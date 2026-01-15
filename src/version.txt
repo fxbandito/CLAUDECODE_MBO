@@ -1,3 +1,11 @@
+v5.2.2 Stable
+- app.py refaktorálva: 1914 sor -> 583 sor
+- Új gui/tabs/ mappa Mixin osztályokkal:
+  - data_loading.py (420 sor) - Data Loading tab
+  - analysis.py (597 sor) - Analysis tab
+  - results.py (346 sor) - Results tab
+- Tisztább kód struktúra, könnyebb karbantartás
+
 v5.2.1 Stable
 - UI gombok javítva az eredeti v4.12.8 alapján
 - Analysis tab: Stop (piros), Pause (sárga), Run Analysis (zöld) SOLID gombok
