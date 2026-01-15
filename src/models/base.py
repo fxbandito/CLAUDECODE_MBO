@@ -100,7 +100,6 @@ class BaseModel(ABC):
         Returns:
             Előrejelzett értékek listája (hossza = steps)
         """
-        pass
 
     def forecast_batch(
         self,

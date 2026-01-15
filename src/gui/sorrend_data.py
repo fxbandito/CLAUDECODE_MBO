@@ -42,7 +42,7 @@ def get_settings(no: int, mode: str = "HK") -> str:
 
     if mode == "HK":
         return _DATA_CACHE.get("HK_DATA", {}).get(str_no, "")
-    elif mode == "SZP":
+    if mode == "SZP":
         return _DATA_CACHE.get("SZP_DATA", {}).get(str_no, "")
     return ""
 

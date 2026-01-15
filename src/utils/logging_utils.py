@@ -92,7 +92,6 @@ class StreamToLogger:
 
     def flush(self):
         """Flush the stream (no-op for logger)."""
-        pass
 
 
 class ProfessionalFormatter(logging.Formatter):

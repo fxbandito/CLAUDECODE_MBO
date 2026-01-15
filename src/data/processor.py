@@ -7,7 +7,6 @@ and data preparation for ML models.
 
 import gc
 import logging
-from typing import Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -84,7 +83,7 @@ class DataProcessor:
         """
         if "No." in df.columns and "Date" in df.columns:
             return df.sort_values(by=["No.", "Date"]).reset_index(drop=True)
-        elif "Date" in df.columns:
+        if "Date" in df.columns:
             return df.sort_values(by="Date").reset_index(drop=True)
         return df
 

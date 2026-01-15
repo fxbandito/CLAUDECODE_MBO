@@ -163,7 +163,7 @@ class ModelRegistry:
         module = importlib.import_module(module_name)
 
         # Megkeressük a BaseModel leszármazottakat
-        for name, obj in inspect.getmembers(module, inspect.isclass):
+        for _, obj in inspect.getmembers(module, inspect.isclass):
             # Csak BaseModel leszármazottak, de nem maga a BaseModel
             if not issubclass(obj, BaseModel):
                 continue

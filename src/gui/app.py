@@ -14,21 +14,10 @@ import customtkinter as ctk
 import pandas as pd
 from PIL import Image
 
-from data.loader import DataLoader
-from data.processor import DataProcessor
 from gui.settings import SettingsManager
 from gui.sorrend_data import get_settings
 from gui.sound_manager import get_sound_manager
 from gui.translate import get_translator, tr
-from models import (
-    get_registry,
-    get_categories,
-    get_models_in_category,
-    get_param_defaults,
-    get_param_options,
-    supports_gpu,
-    supports_batch,
-)
 
 from gui.tabs.data_loading import DataLoadingMixin
 from gui.tabs.analysis import AnalysisMixin

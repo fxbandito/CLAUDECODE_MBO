@@ -20,7 +20,7 @@ except ImportError:
     pygame = None
 
 # Determine which audio backend to use
-SOUND_BACKEND = None
+SOUND_BACKEND = None  # pylint: disable=invalid-name
 
 if platform.system() == "Windows" and winsound is not None:
     SOUND_BACKEND = "winsound"

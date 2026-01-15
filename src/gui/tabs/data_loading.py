@@ -264,7 +264,7 @@ class DataLoadingMixin:
                 if summary['features'] > 0:
                     msg += f", {summary['features']} features"
                 self.after(0, lambda m=msg: self._log(m))
-                self.after(0, lambda: self.sound.play_model_complete())
+                self.after(0, self.sound.play_model_complete)
             else:
                 self.after(0, lambda: self._log(tr("No data found in folder."), "warning"))
 
@@ -312,7 +312,7 @@ class DataLoadingMixin:
                 if summary['features'] > 0:
                     msg += f", {summary['features']} features"
                 self.after(0, lambda m=msg: self._log(m))
-                self.after(0, lambda: self.sound.play_model_complete())
+                self.after(0, self.sound.play_model_complete)
             else:
                 self.after(0, lambda: self._log(tr("No data in parquet files."), "warning"))
 
@@ -346,7 +346,7 @@ class DataLoadingMixin:
             filename = os.path.basename(output_path)
             msg = f"{tr('Conversion complete! Saved:')} {filename} ({rows} {tr('rows')})"
             self.after(0, lambda m=msg: self._log(m))
-            self.after(0, lambda: self.sound.play_model_complete())
+            self.after(0, self.sound.play_model_complete)
             self.after(500, lambda: self.set_progress(0))
 
         except Exception as e:

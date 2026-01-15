@@ -410,7 +410,7 @@ class AnalysisMixin:
             self.model_var.set(models[0])
             self._on_model_change(models[0])
 
-    def _on_model_change(self, model_name: str):
+    def _on_model_change(self, _model_name: str):
         """Modell váltás."""
         self.sound.play_button_click()
         self._update_param_ui()
@@ -506,15 +506,17 @@ class AnalysisMixin:
 
     def _on_panel_mode_change(self):
         """Panel mode váltás."""
-        self.sound.play_checkbox_on() if self.var_panel_mode.get() else None
-        if self.var_panel_mode.get() and self.var_dual_model.get():
-            self.var_dual_model.set(False)
+        if self.var_panel_mode.get():
+            self.sound.play_checkbox_on()
+            if self.var_dual_model.get():
+                self.var_dual_model.set(False)
 
     def _on_dual_model_change(self):
         """Dual model váltás."""
-        self.sound.play_checkbox_on() if self.var_dual_model.get() else None
-        if self.var_dual_model.get() and self.var_panel_mode.get():
-            self.var_panel_mode.set(False)
+        if self.var_dual_model.get():
+            self.sound.play_checkbox_on()
+            if self.var_panel_mode.get():
+                self.var_panel_mode.set(False)
 
     def _on_horizon_change(self, value: float):
         """Forecast horizon változás."""
@@ -594,4 +596,3 @@ Note: Panel and Dual modes are mutually exclusive.""")
         text.configure(state="disabled")
 
         ctk.CTkButton(popup, text="Close", command=popup.destroy).pack(pady=10)
-

@@ -4,9 +4,9 @@ Mixin osztály a Results tab funkcionalitásához.
 """
 # pylint: disable=too-many-instance-attributes,attribute-defined-outside-init
 
-import customtkinter as ctk
+from tkinter import filedialog
 
-from gui.translate import tr
+import customtkinter as ctk
 
 
 class ResultsMixin:
@@ -343,4 +343,3 @@ Click "Apply Ranking" to re-sort the results table.""")
         text.configure(state="disabled")
 
         ctk.CTkButton(popup, text="Close", command=popup.destroy).pack(pady=10)
-
