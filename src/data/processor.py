@@ -343,3 +343,211 @@ class DataProcessor:
         if df is None or df.empty:
             return 0
         return len([c for c in df.columns if c.startswith("feat_")])
+
+    # ==================== RANKING SYSTEM ====================
+
+    @staticmethod
+    def calculate_stability_metrics(raw_data, results_df):
+        """
+        Calculate stability metrics for each strategy based on historical data.
+
+        Metrics calculated:
+        - activity_consistency: How consistent is the trading activity
+        - profit_consistency: Ratio of positive weeks among active weeks
+        - sharpe_ratio: Risk-adjusted return (mean/std of profits)
+        - data_confidence: Confidence based on amount of data
+
+        Args:
+            raw_data: Original DataFrame with historical strategy data
+            results_df: DataFrame with forecast results
+
+        Returns:
+            DataFrame with stability metrics added
+        """
+        if raw_data is None or results_df is None or results_df.empty:
+            logger.warning("calculate_stability_metrics: raw_data or results_df is None/empty")
+            return results_df
+
+        logger.info("Calculating stability metrics for ranking...")
+
+        # Get strategy IDs we need to calculate
+        try:
+            strategy_ids = set(results_df["No."].astype(int).values)
+        except (ValueError, TypeError):
+            strategy_ids = set(results_df["No."].values)
+
+        # Pre-filter raw_data to only include relevant strategies
+        filtered_data = raw_data.copy()
+        if "No." in filtered_data.columns:
+            try:
+                filtered_data["No."] = (
+                    pd.to_numeric(filtered_data["No."], errors="coerce").fillna(-1).astype(int)
+                )
+            except (ValueError, TypeError):
+                pass
+        filtered_data = filtered_data[filtered_data["No."].isin(strategy_ids)]
+
+        has_trades_col = "Trades" in filtered_data.columns
+        grouped = filtered_data.groupby("No.")
+
+        def calc_metrics(group):
+            profits = group["Profit"].values
+            trades = group["Trades"].values if has_trades_col else (profits != 0).astype(int)
+
+            total_weeks = len(profits)
+            active_weeks = np.sum(trades > 0)
+            pos_weeks = np.sum(profits > 0)
+            neg_weeks = np.sum(profits < 0)
+
+            # Activity Consistency
+            if total_weeks >= 13:
+                rolling_activity = pd.Series(trades > 0).rolling(13, min_periods=4).mean()
+                activity_mean = rolling_activity.mean()
+                activity_std = rolling_activity.std()
+                if activity_mean > 0:
+                    activity_cv = activity_std / activity_mean
+                    activity_consistency = max(0, 1 - activity_cv)
+                else:
+                    activity_consistency = 0.0
+            else:
+                activity_consistency = active_weeks / total_weeks if total_weeks > 0 else 0.0
+
+            # Profit Consistency
+            if (pos_weeks + neg_weeks) > 0:
+                profit_consistency = pos_weeks / (pos_weeks + neg_weeks)
+            else:
+                profit_consistency = 0.5
+
+            # Sharpe Ratio
+            mean_profit = np.mean(profits)
+            std_profit = np.std(profits)
+            sharpe_ratio = mean_profit / std_profit if std_profit > 0 else 0.0
+
+            # Data Confidence
+            data_confidence = min(1.0, total_weeks / 104)
+
+            # Combined Stability Score
+            stability_score = (
+                0.30 * activity_consistency
+                + 0.35 * profit_consistency
+                + 0.20 * min(1.0, max(0.0, (sharpe_ratio + 1) / 3))
+                + 0.15 * data_confidence
+            )
+
+            return pd.Series({
+                "Stability_Score": round(stability_score, 4),
+                "Activity_Consistency": round(activity_consistency, 4),
+                "Profit_Consistency": round(profit_consistency, 4),
+                "Sharpe_Ratio": round(sharpe_ratio, 4),
+                "Data_Confidence": round(data_confidence, 4),
+            })
+
+        stability_df = grouped.apply(calc_metrics, include_groups=False).reset_index()
+
+        # Handle strategies not found in raw_data
+        missing_ids = strategy_ids - set(stability_df["No."].values)
+        if missing_ids:
+            logger.warning("%d strategies not found in raw_data, using defaults", len(missing_ids))
+            default_rows = pd.DataFrame([
+                {
+                    "No.": sid,
+                    "Stability_Score": 0.5,
+                    "Activity_Consistency": 0.5,
+                    "Profit_Consistency": 0.5,
+                    "Sharpe_Ratio": 0.0,
+                    "Data_Confidence": 0.5,
+                }
+                for sid in missing_ids
+            ])
+            stability_df = pd.concat([stability_df, default_rows], ignore_index=True)
+
+        # Merge with results
+        try:
+            results_to_merge = results_df.copy()
+            results_to_merge["No."] = (
+                pd.to_numeric(results_to_merge["No."], errors="coerce").fillna(-1).astype(int)
+            )
+            stability_df["No."] = (
+                pd.to_numeric(stability_df["No."], errors="coerce").fillna(-1).astype(int)
+            )
+            results_with_stability = results_to_merge.merge(stability_df, on="No.", how="left")
+        except (ValueError, TypeError) as e:
+            logger.error("Merge failed: %s. Falling back to original merge.", e)
+            results_with_stability = results_df.merge(stability_df, on="No.", how="left")
+
+        logger.info("Stability metrics calculated for %d strategies", len(stability_df))
+        return results_with_stability
+
+    @staticmethod
+    def apply_ranking(results_df, ranking_mode="forecast", sort_column="Forecast_1M"):
+        """
+        Apply ranking based on selected mode.
+
+        Ranking modes:
+        - 'forecast': Sort by forecast only (default)
+        - 'stability': Percentile-based (60% forecast, 40% stability)
+        - 'risk_adjusted': Percentile-based (50% forecast, 30% Sharpe, 20% consistency)
+
+        Args:
+            results_df: DataFrame with results and stability metrics
+            ranking_mode: One of 'forecast', 'stability', 'risk_adjusted'
+            sort_column: Which forecast column to use (default: Forecast_1M)
+
+        Returns:
+            tuple: (sorted DataFrame, sort_column_name used)
+        """
+        logger.info("Applying ranking mode: '%s' (sort_column: %s)", ranking_mode, sort_column)
+
+        if results_df is None or results_df.empty:
+            logger.warning("apply_ranking: results_df is None or empty")
+            return results_df, sort_column
+
+        df = results_df.copy()
+
+        if ranking_mode == "forecast":
+            sort_col = sort_column
+            df = df.sort_values(sort_col, ascending=False)
+
+        elif ranking_mode == "stability":
+            if "Stability_Score" not in df.columns:
+                logger.warning("Stability metrics not found, falling back to forecast ranking")
+                sort_col = sort_column
+                df = df.sort_values(sort_col, ascending=False)
+            else:
+                forecast_pct = df[sort_column].rank(pct=True) * 100
+                stability_pct = df["Stability_Score"].rank(pct=True) * 100
+                df["Ranking_Score"] = (forecast_pct * 0.60) + (stability_pct * 0.40)
+                sort_col = "Ranking_Score"
+                df = df.sort_values(sort_col, ascending=False)
+
+        elif ranking_mode == "risk_adjusted":
+            if "Sharpe_Ratio" not in df.columns:
+                logger.warning("Risk metrics not found, falling back to forecast ranking")
+                sort_col = sort_column
+                df = df.sort_values(sort_col, ascending=False)
+            else:
+                forecast_pct = df[sort_column].rank(pct=True) * 100
+                sharpe_pct = df["Sharpe_Ratio"].rank(pct=True) * 100
+
+                if "Profit_Consistency" in df.columns:
+                    consistency_pct = df["Profit_Consistency"].rank(pct=True) * 100
+                    df["Ranking_Score"] = (
+                        (forecast_pct * 0.50) +
+                        (sharpe_pct * 0.30) +
+                        (consistency_pct * 0.20)
+                    )
+                else:
+                    df["Ranking_Score"] = (forecast_pct * 0.60) + (sharpe_pct * 0.40)
+
+                sort_col = "Ranking_Score"
+                df = df.sort_values(sort_col, ascending=False)
+
+        else:
+            logger.warning("Unknown ranking mode: %s, using forecast", ranking_mode)
+            sort_col = sort_column
+            df = df.sort_values(sort_col, ascending=False)
+
+        # Add rank column
+        df["Rank"] = range(1, len(df) + 1)
+
+        return df, sort_col

@@ -3,9 +3,9 @@ GUI Tab modulok - MBO Trading Strategy Analyzer
 Minden tab külön Mixin osztályként van implementálva.
 """
 
-from gui.tabs.data_loading import DataLoadingMixin
-from gui.tabs.analysis import AnalysisMixin
-from gui.tabs.results import ResultsMixin
+from .data_loading import DataLoadingMixin
+from .analysis import AnalysisMixin
+from .results import ResultsMixin
 
 __all__ = [
     "DataLoadingMixin",

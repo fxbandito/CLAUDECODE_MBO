@@ -1,6 +1,6 @@
 """
 GUI Settings Manager - saves and loads window state and user preferences.
-Settings are stored in a JSON file in the user's home directory.
+Settings are stored in a JSON file in the gui folder (same location as this file).
 """
 
 import json
@@ -24,6 +24,9 @@ class SettingsManager:
             "last_folder": "",
             "last_parquet_folder": "",
             "last_convert_folder": "",
+            "last_results_output_folder": "",
+            "last_analysis_state_folder": "",
+            "last_csv_export_folder": "",
         },
         "preferences": {
             "language": "EN",
@@ -33,30 +36,13 @@ class SettingsManager:
         },
     }
 
-    def __init__(self, app_name: str = "MBOAnalyzer"):
-        """
-        Initialize settings manager.
-
-        Args:
-            app_name: Application name for settings folder
-        """
-        self.app_name = app_name
-        self.settings_dir = self._get_settings_dir()
-        self.settings_file = self.settings_dir / "settings.json"
+    def __init__(self):
+        """Initialize settings manager."""
+        # Store settings in the gui folder (same directory as this file)
+        self.settings_dir = Path(os.path.dirname(__file__))
+        self.settings_file = self.settings_dir / "window_config.json"
         self.settings: Dict[str, Any] = {}
         self._load()
-
-    def _get_settings_dir(self) -> Path:
-        """Get the settings directory path."""
-        # Use AppData on Windows, ~/.config on Linux/Mac
-        if os.name == "nt":  # Windows
-            base = Path(os.environ.get("APPDATA", Path.home()))
-        else:
-            base = Path.home() / ".config"
-
-        settings_dir = base / self.app_name
-        settings_dir.mkdir(parents=True, exist_ok=True)
-        return settings_dir
 
     def _load(self):
         """Load settings from JSON file."""
@@ -140,6 +126,36 @@ class SettingsManager:
         if "paths" not in self.settings:
             self.settings["paths"] = {}
         self.settings["paths"]["last_convert_folder"] = path
+
+    def get_last_results_output_folder(self) -> str:
+        """Get last results output folder path."""
+        return self.settings.get("paths", {}).get("last_results_output_folder", "")
+
+    def set_last_results_output_folder(self, path: str):
+        """Save last results output folder path."""
+        if "paths" not in self.settings:
+            self.settings["paths"] = {}
+        self.settings["paths"]["last_results_output_folder"] = path
+
+    def get_last_analysis_state_folder(self) -> str:
+        """Get last analysis state folder path."""
+        return self.settings.get("paths", {}).get("last_analysis_state_folder", "")
+
+    def set_last_analysis_state_folder(self, path: str):
+        """Save last analysis state folder path."""
+        if "paths" not in self.settings:
+            self.settings["paths"] = {}
+        self.settings["paths"]["last_analysis_state_folder"] = path
+
+    def get_last_csv_export_folder(self) -> str:
+        """Get last CSV export folder path."""
+        return self.settings.get("paths", {}).get("last_csv_export_folder", "")
+
+    def set_last_csv_export_folder(self, path: str):
+        """Save last CSV export folder path."""
+        if "paths" not in self.settings:
+            self.settings["paths"] = {}
+        self.settings["paths"]["last_csv_export_folder"] = path
 
     # === Preferences ===
 

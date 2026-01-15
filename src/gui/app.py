@@ -96,6 +96,9 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ctk.CTk):
         # Ablak ikon beállítása
         self._setup_icon()
 
+        # Mappa útvonalak betöltése ELŐBB (mielőtt a tabok létrejönnek)
+        self._load_folder_paths()
+
         # UI felépítése
         self._create_layout()
         self._create_header()
@@ -158,6 +161,31 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ctk.CTk):
         self.feature_var.set(saved_mode)
         self._update_feature_info()
 
+    def _load_folder_paths(self):
+        """Load saved folder paths from settings."""
+        self.last_open_folder = self.settings.get_last_folder()
+        self.last_parquet_folder = self.settings.get_last_parquet_folder()
+        self.last_convert_folder = self.settings.get_last_convert_folder()
+        self.last_results_output_folder = self.settings.get_last_results_output_folder()
+        self.last_analysis_state_folder = self.settings.get_last_analysis_state_folder()
+        self.last_csv_export_folder = self.settings.get_last_csv_export_folder()
+
+    def save_window_state(self):
+        """Save folder paths to settings (called from tabs)."""
+        self.settings.set_last_folder(getattr(self, "last_open_folder", ""))
+        self.settings.set_last_parquet_folder(getattr(self, "last_parquet_folder", ""))
+        self.settings.set_last_convert_folder(getattr(self, "last_convert_folder", ""))
+        self.settings.set_last_results_output_folder(
+            getattr(self, "last_results_output_folder", "")
+        )
+        self.settings.set_last_analysis_state_folder(
+            getattr(self, "last_analysis_state_folder", "")
+        )
+        self.settings.set_last_csv_export_folder(
+            getattr(self, "last_csv_export_folder", "")
+        )
+        self.settings.save()
+
     def _save_settings_now(self):
         """Save settings immediately (crash protection)."""
         self.settings.set_window_geometry(
@@ -170,7 +198,8 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ctk.CTk):
         self.settings.set_dark_mode(self.is_dark_mode)
         self.settings.set_muted(self.is_muted)
         self.settings.set_feature_mode(self.feature_var.get())
-        self.settings.save()
+        # Also save folder paths
+        self.save_window_state()
 
     def _on_close(self):
         """Ablak bezárásakor beállítások mentése."""

@@ -88,6 +88,7 @@ Log/
 raw_data/
 output/
 reports/
+window_config.json
 
 # Old code (reference only, not tracked)
 src_old/
