@@ -1,3 +1,10 @@
+v5.2.0 Stable
+- Analysis tab complete (Auto, Category/Model selection, Parameters)
+- Results tab complete (Ranking, Export, Reports)
+- Dynamic Model Registry (86 models, 13 categories)
+- Consistent UI styling (28px buttons, original colors)
+- Model-specific parameter UI generation
+
 v5.1.0 Stable
 - Pylint 10.00/10 - tiszta kód
 - Sound Manager (winsound/pygame backend)

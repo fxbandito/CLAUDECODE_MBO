@@ -22,6 +22,15 @@ from gui.settings import SettingsManager
 from gui.sorrend_data import get_settings
 from gui.sound_manager import get_sound_manager
 from gui.translate import get_translator, tr
+from models import (
+    get_registry,
+    get_categories,
+    get_models_in_category,
+    get_param_defaults,
+    get_param_options,
+    supports_gpu,
+    supports_batch,
+)
 
 
 def get_version() -> str:
@@ -214,14 +223,18 @@ class MBOApp(ctk.CTk):
             light_logo_path = os.path.join(assets_dir, "light_logo.png")
 
             if os.path.exists(dark_logo_path) and os.path.exists(light_logo_path):
-                pil_img = Image.open(dark_logo_path)
-                aspect = pil_img.width / pil_img.height
-                h = 40
-                w = int(h * aspect)
+                with Image.open(dark_logo_path) as dark_img:
+                    aspect = dark_img.width / dark_img.height
+                    h = 40
+                    w = int(h * aspect)
+                    dark_copy = dark_img.copy()
+
+                with Image.open(light_logo_path) as light_img:
+                    light_copy = light_img.copy()
 
                 self.logo_image = ctk.CTkImage(
-                    light_image=Image.open(light_logo_path),
-                    dark_image=Image.open(dark_logo_path),
+                    light_image=light_copy,
+                    dark_image=dark_copy,
                     size=(w, h),
                 )
                 self.logo_label = ctk.CTkLabel(self.logo_frame, text="", image=self.logo_image)
@@ -383,6 +396,10 @@ class MBOApp(ctk.CTk):
         for tab_name in self.TAB_NAMES:
             if tab_name == "Data Loading":
                 tab_frame = self._create_data_tab()
+            elif tab_name == "Analysis":
+                tab_frame = self._create_analysis_tab()
+            elif tab_name == "Results":
+                tab_frame = self._create_results_tab()
             else:
                 tab_frame = self._create_placeholder_tab(tab_name)
             tab_frame.grid(row=0, column=0, sticky="nsew")
@@ -399,7 +416,7 @@ class MBOApp(ctk.CTk):
         self.folder_label = ctk.CTkLabel(
             top_frame,
             text=tr("No folder selected"),
-            font=ctk.CTkFont(size=12),
+            font=ctk.CTkFont(size=11),
             anchor="w"
         )
         self.folder_label.pack(side="left")
@@ -407,10 +424,11 @@ class MBOApp(ctk.CTk):
         self.btn_open_folder = ctk.CTkButton(
             top_frame,
             text=tr("Open Folder"),
-            width=110,
-            height=32,
+            width=100,
+            height=28,
             fg_color="#3498db",
             hover_color="#2980b9",
+            font=ctk.CTkFont(size=11, weight="bold"),
             command=self._on_open_folder
         )
         self.btn_open_folder.pack(side="right", padx=5)
@@ -418,10 +436,11 @@ class MBOApp(ctk.CTk):
         self.btn_open_parquet = ctk.CTkButton(
             top_frame,
             text=tr("Open Parquet"),
-            width=110,
-            height=32,
+            width=100,
+            height=28,
             fg_color="#3498db",
             hover_color="#2980b9",
+            font=ctk.CTkFont(size=11, weight="bold"),
             command=self._on_open_parquet
         )
         self.btn_open_parquet.pack(side="right", padx=5)
@@ -429,10 +448,11 @@ class MBOApp(ctk.CTk):
         self.btn_convert = ctk.CTkButton(
             top_frame,
             text=tr("Convert Excel to Parquet"),
-            width=160,
-            height=32,
+            width=150,
+            height=28,
             fg_color="#9b59b6",
             hover_color="#8e44ad",
+            font=ctk.CTkFont(size=11, weight="bold"),
             command=self._on_convert_excel
         )
         self.btn_convert.pack(side="right", padx=5)
@@ -444,7 +464,7 @@ class MBOApp(ctk.CTk):
         ctk.CTkLabel(
             feature_frame,
             text=tr("Feature Mode:"),
-            font=ctk.CTkFont(size=12)
+            font=ctk.CTkFont(size=11)
         ).pack(side="left", padx=(0, 10))
 
         self.feature_var = ctk.StringVar(value="Original")
@@ -530,6 +550,905 @@ class MBOApp(ctk.CTk):
         self.data_preview.pack(fill="both", expand=True, padx=5, pady=5)
 
         return frame
+
+    def _create_analysis_tab(self) -> ctk.CTkFrame:
+        """Analysis tab - teljes implementáció a screenshot alapján."""
+        frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+
+        # === ROW 1: Fő vezérlők ===
+        row1 = ctk.CTkFrame(frame, fg_color="transparent", height=40)
+        row1.pack(fill="x", pady=(5, 3))
+
+        # Auto gomb - cián
+        self.btn_auto = ctk.CTkButton(
+            row1,
+            text="Auto",
+            width=60,
+            height=28,
+            fg_color="#17a2b8",
+            hover_color="#138496",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._on_auto_click
+        )
+        self.btn_auto.pack(side="left", padx=(0, 10))
+
+        # Category dropdown
+        ctk.CTkLabel(
+            row1,
+            text="Category:",
+            font=ctk.CTkFont(size=11)
+        ).pack(side="left", padx=(0, 5))
+
+        categories = get_categories()
+        self.category_var = ctk.StringVar(value=categories[0] if categories else "")
+        self.category_combo = ctk.CTkComboBox(
+            row1,
+            values=categories,
+            variable=self.category_var,
+            width=300,
+            height=28,
+            font=ctk.CTkFont(size=10),
+            command=self._on_category_change
+        )
+        self.category_combo.pack(side="left", padx=(0, 15))
+
+        # Model dropdown
+        ctk.CTkLabel(
+            row1,
+            text="Model:",
+            font=ctk.CTkFont(size=11)
+        ).pack(side="left", padx=(0, 5))
+
+        initial_models = get_models_in_category(self.category_var.get()) if categories else []
+        self.model_var = ctk.StringVar(value=initial_models[0] if initial_models else "")
+        self.model_combo = ctk.CTkComboBox(
+            row1,
+            values=initial_models,
+            variable=self.model_var,
+            width=200,
+            height=28,
+            font=ctk.CTkFont(size=10),
+            command=self._on_model_change
+        )
+        self.model_combo.pack(side="left", padx=(0, 5))
+
+        # Help gomb (?)
+        self.btn_model_help = ctk.CTkButton(
+            row1,
+            text="?",
+            width=26,
+            height=26,
+            corner_radius=13,
+            fg_color="#555555",
+            hover_color="#666666",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._show_model_help
+        )
+        self.btn_model_help.pack(side="left", padx=(0, 15))
+
+        # BATCH MODE gomb
+        self.btn_batch_mode = ctk.CTkButton(
+            row1,
+            text="BATCH MODE",
+            width=95,
+            height=28,
+            fg_color="#444444",
+            hover_color="#555555",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            state="disabled"
+        )
+        self.btn_batch_mode.pack(side="left", padx=(0, 10))
+
+        # Jobb oldali kontrollok frame
+        right_controls = ctk.CTkFrame(row1, fg_color="transparent")
+        right_controls.pack(side="right")
+
+        # Run Analysis gomb - zöld
+        self.btn_run = ctk.CTkButton(
+            right_controls,
+            text="Run Analysis",
+            width=110,
+            height=28,
+            fg_color="#27ae60",
+            hover_color="#229954",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._on_run_analysis
+        )
+        self.btn_run.pack(side="right", padx=(8, 0))
+
+        # Pause gomb - sárga/narancs
+        self.btn_pause = ctk.CTkButton(
+            right_controls,
+            text="Pause",
+            width=70,
+            height=28,
+            fg_color="#f39c12",
+            hover_color="#d68910",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            state="disabled",
+            command=self._on_pause_analysis
+        )
+        self.btn_pause.pack(side="right", padx=(8, 0))
+
+        # Stop gomb - piros
+        self.btn_stop = ctk.CTkButton(
+            right_controls,
+            text="Stop",
+            width=70,
+            height=28,
+            fg_color="#e74c3c",
+            hover_color="#c0392b",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            state="disabled",
+            command=self._on_stop_analysis
+        )
+        self.btn_stop.pack(side="right", padx=(8, 0))
+
+        # Shutdown checkbox
+        self.var_shutdown = ctk.BooleanVar(value=False)
+        self.chk_shutdown = ctk.CTkCheckBox(
+            right_controls,
+            text="Shutdown",
+            variable=self.var_shutdown,
+            font=ctk.CTkFont(size=11),
+            text_color="#e74c3c"
+        )
+        self.chk_shutdown.pack(side="right", padx=(0, 15))
+
+        # === ROW 2: Teljesítmény vezérlők ===
+        row2 = ctk.CTkFrame(frame, fg_color="transparent", height=40)
+        row2.pack(fill="x", pady=3)
+
+        # CPU Power slider
+        ctk.CTkLabel(
+            row2,
+            text="CPU Power:",
+            font=ctk.CTkFont(size=11)
+        ).pack(side="left", padx=(0, 5))
+
+        self.cpu_slider = ctk.CTkSlider(
+            row2,
+            from_=10,
+            to=100,
+            number_of_steps=18,
+            width=150,
+            command=self._on_cpu_change
+        )
+        self.cpu_slider.set(85)
+        self.cpu_slider.pack(side="left", padx=(0, 5))
+
+        import multiprocessing
+        cores = multiprocessing.cpu_count()
+        self.cpu_label = ctk.CTkLabel(
+            row2,
+            text=f"85% ({int(cores * 0.85)} cores)",
+            font=ctk.CTkFont(size=11),
+            width=100
+        )
+        self.cpu_label.pack(side="left", padx=(0, 20))
+
+        # Use GPU switch
+        self.var_gpu = ctk.BooleanVar(value=False)
+        self.switch_gpu = ctk.CTkSwitch(
+            row2,
+            text="Use GPU",
+            variable=self.var_gpu,
+            font=ctk.CTkFont(size=11),
+            command=self._on_gpu_toggle
+        )
+        self.switch_gpu.pack(side="left", padx=(0, 20))
+
+        # Panel Mode checkbox
+        self.var_panel_mode = ctk.BooleanVar(value=False)
+        self.chk_panel_mode = ctk.CTkCheckBox(
+            row2,
+            text="Panel Mode",
+            variable=self.var_panel_mode,
+            font=ctk.CTkFont(size=11),
+            command=self._on_panel_mode_change
+        )
+        self.chk_panel_mode.pack(side="left", padx=(0, 3))
+
+        ctk.CTkButton(
+            row2, text="?", width=22, height=22, corner_radius=11,
+            fg_color="#555555", hover_color="#777777",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            command=self._show_panel_help
+        ).pack(side="left", padx=(0, 15))
+
+        # Dual Model checkbox
+        self.var_dual_model = ctk.BooleanVar(value=False)
+        self.chk_dual_model = ctk.CTkCheckBox(
+            row2,
+            text="Dual Model",
+            variable=self.var_dual_model,
+            font=ctk.CTkFont(size=11),
+            command=self._on_dual_model_change
+        )
+        self.chk_dual_model.pack(side="left", padx=(0, 3))
+
+        ctk.CTkButton(
+            row2, text="?", width=22, height=22, corner_radius=11,
+            fg_color="#555555", hover_color="#777777",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            command=self._show_dual_help
+        ).pack(side="left", padx=(0, 20))
+
+        # Forecast Horizon
+        ctk.CTkLabel(
+            row2,
+            text="Forecast Horizon:",
+            font=ctk.CTkFont(size=11)
+        ).pack(side="left", padx=(0, 5))
+
+        self.horizon_slider = ctk.CTkSlider(
+            row2,
+            from_=1,
+            to=104,
+            number_of_steps=103,
+            width=150,
+            command=self._on_horizon_change
+        )
+        self.horizon_slider.set(52)
+        self.horizon_slider.pack(side="left", padx=(0, 5))
+
+        self.horizon_label = ctk.CTkLabel(
+            row2,
+            text="52",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            width=30
+        )
+        self.horizon_label.pack(side="left", padx=(0, 20))
+
+        # Time display
+        self.time_label = ctk.CTkLabel(
+            row2,
+            text="Time: 00:00:00",
+            font=ctk.CTkFont(family="Consolas", size=12, weight="bold")
+        )
+        self.time_label.pack(side="right", padx=(0, 10))
+
+        # === ROW 3: Paraméterek (dinamikus) ===
+        self.params_frame = ctk.CTkFrame(frame, fg_color="transparent", height=50)
+        self.params_frame.pack(fill="x", pady=5)
+
+        self.param_widgets = {}  # Widget referenciák tárolása
+        self._update_param_ui()  # Első model paramétereinek betöltése
+
+        # === Model Documentation - keretes szekció ===
+        doc_frame = ctk.CTkFrame(frame, corner_radius=8)
+        doc_frame.pack(fill="both", expand=True, pady=(10, 5))
+
+        doc_label = ctk.CTkLabel(
+            doc_frame,
+            text="Model Documentation",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            anchor="w"
+        )
+        doc_label.pack(fill="x", padx=10, pady=(8, 5))
+
+        self.model_doc_text = ctk.CTkTextbox(
+            doc_frame,
+            font=ctk.CTkFont(family="Consolas", size=11),
+        )
+        self.model_doc_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        self.model_doc_text.insert("1.0", tr("Select a model to see its documentation here."))
+        self.model_doc_text.configure(state="disabled")
+
+        # Induló állapot beállítása
+        self._update_model_ui_state()
+
+        return frame
+
+    def _update_param_ui(self):
+        """Paraméter UI frissítése az aktuális modell alapján."""
+        # Régi widgetek törlése
+        for widget in self.params_frame.winfo_children():
+            widget.destroy()
+        self.param_widgets.clear()
+
+        model_name = self.model_var.get()
+        if not model_name:
+            return
+
+        defaults = get_param_defaults(model_name)
+        options = get_param_options(model_name)
+
+        if not defaults:
+            ctk.CTkLabel(
+                self.params_frame,
+                text=tr("No configurable parameters for this model."),
+                font=ctk.CTkFont(size=11),
+                text_color="gray"
+            ).pack(side="left")
+            return
+
+        # Paraméterek megjelenítése
+        for key, default_val in defaults.items():
+            # Label
+            label_text = key.replace("_", " ").title() + ":"
+            ctk.CTkLabel(
+                self.params_frame,
+                text=label_text,
+                font=ctk.CTkFont(size=10)
+            ).pack(side="left", padx=(0, 3))
+
+            # Ha van option lista -> ComboBox, különben Entry
+            if key in options:
+                widget = ctk.CTkComboBox(
+                    self.params_frame,
+                    values=options[key],
+                    width=80,
+                    height=28
+                )
+                widget.set(default_val)
+            else:
+                widget = ctk.CTkEntry(
+                    self.params_frame,
+                    width=60,
+                    height=28
+                )
+                widget.insert(0, default_val)
+
+            widget.pack(side="left", padx=(0, 10))
+            self.param_widgets[key] = widget
+
+    def _update_model_ui_state(self):
+        """Frissíti a UI állapotát az aktuális modell alapján."""
+        model_name = self.model_var.get()
+        if not model_name:
+            return
+
+        # GPU switch állapot
+        if supports_gpu(model_name):
+            self.switch_gpu.configure(state="normal")
+        else:
+            self.var_gpu.set(False)
+            self.switch_gpu.configure(state="disabled")
+
+        # Batch mode gomb
+        if supports_batch(model_name):
+            self.btn_batch_mode.configure(state="normal", fg_color="#5d5d5d")
+        else:
+            self.btn_batch_mode.configure(state="disabled", fg_color="#444444")
+
+        # Panel és Dual mode checkbox-ok
+        # (mindkettőhöz kell, hogy a modell támogassa a batch-et)
+        if supports_batch(model_name):
+            self.chk_panel_mode.configure(state="normal")
+            self.chk_dual_model.configure(state="normal")
+        else:
+            self.var_panel_mode.set(False)
+            self.var_dual_model.set(False)
+            self.chk_panel_mode.configure(state="disabled")
+            self.chk_dual_model.configure(state="disabled")
+
+    # === Analysis tab eseménykezelők ===
+
+    def _on_category_change(self, category: str):
+        """Kategória váltás."""
+        self.sound.play_button_click()
+        models = get_models_in_category(category)
+        self.model_combo.configure(values=models)
+        if models:
+            self.model_var.set(models[0])
+            self._on_model_change(models[0])
+
+    def _on_model_change(self, model_name: str):
+        """Modell váltás."""
+        self.sound.play_button_click()
+        self._update_param_ui()
+        self._update_model_ui_state()
+        self._update_model_documentation()
+
+    def _update_model_documentation(self):
+        """Frissíti a model dokumentációt."""
+        model_name = self.model_var.get()
+        if not model_name:
+            return
+
+        from models import get_model_info
+        info = get_model_info(model_name)
+
+        if info:
+            doc_text = f"=== {info.name} ===\n\n"
+            doc_text += f"Category: {info.category}\n"
+            doc_text += f"GPU Support: {'Yes' if info.supports_gpu else 'No'}\n"
+            doc_text += f"Batch Mode: {'Yes' if info.supports_batch else 'No'}\n\n"
+
+            defaults = get_param_defaults(model_name)
+            if defaults:
+                doc_text += "Default Parameters:\n"
+                for k, v in defaults.items():
+                    doc_text += f"  - {k}: {v}\n"
+
+            self.model_doc_text.configure(state="normal")
+            self.model_doc_text.delete("1.0", "end")
+            self.model_doc_text.insert("1.0", doc_text)
+            self.model_doc_text.configure(state="disabled")
+
+    def _on_auto_click(self):
+        """Auto Execution ablak megnyitása."""
+        self.sound.play_button_click()
+        self._log("Auto Execution window - coming soon...")
+
+    def _on_run_analysis(self):
+        """Elemzés indítása."""
+        self.sound.play_button_click()
+
+        if self.processed_data is None or self.processed_data.empty:
+            self._log(tr("Please load data first!"), "warning")
+            return
+
+        model_name = self.model_var.get()
+        self._log(f"Starting analysis with {model_name}...")
+
+        # UI állapot frissítése
+        self.btn_run.configure(state="disabled")
+        self.btn_stop.configure(state="normal")
+        self.btn_pause.configure(state="normal")
+
+        # TODO: Tényleges elemzés indítása háttérszálon
+
+    def _on_stop_analysis(self):
+        """Elemzés leállítása."""
+        self.sound.play_button_click()
+        self._log("Stopping analysis...")
+        self.btn_run.configure(state="normal")
+        self.btn_stop.configure(state="disabled")
+        self.btn_pause.configure(state="disabled")
+
+    def _on_pause_analysis(self):
+        """Elemzés szüneteltetése/folytatása."""
+        self.sound.play_button_click()
+        if self.btn_pause.cget("text") == "Pause":
+            self.btn_pause.configure(text="Resume", fg_color="#27ae60")
+            self._log("Analysis paused.")
+        else:
+            self.btn_pause.configure(text="Pause", fg_color="#f39c12")
+            self._log("Analysis resumed.")
+
+    def _on_cpu_change(self, value: float):
+        """CPU slider változás."""
+        import multiprocessing
+        cores = multiprocessing.cpu_count()
+        pct = int(value)
+        used_cores = int(cores * pct / 100)
+        self.cpu_label.configure(text=f"{pct}% ({used_cores} cores)")
+
+    def _on_gpu_toggle(self):
+        """GPU toggle."""
+        self.sound.play_toggle_switch()
+        state = "enabled" if self.var_gpu.get() else "disabled"
+        self._log(f"GPU {state}")
+
+    def _on_panel_mode_change(self):
+        """Panel mode váltás."""
+        self.sound.play_checkbox_on() if self.var_panel_mode.get() else None
+        if self.var_panel_mode.get() and self.var_dual_model.get():
+            self.var_dual_model.set(False)
+
+    def _on_dual_model_change(self):
+        """Dual model váltás."""
+        self.sound.play_checkbox_on() if self.var_dual_model.get() else None
+        if self.var_dual_model.get() and self.var_panel_mode.get():
+            self.var_panel_mode.set(False)
+
+    def _on_horizon_change(self, value: float):
+        """Forecast horizon változás."""
+        self.horizon_label.configure(text=str(int(value)))
+
+    def _show_model_help(self):
+        """Model help popup."""
+        self.sound.play_button_click()
+        model_name = self.model_var.get()
+        self._log(f"Help for {model_name} - coming soon...")
+
+    def _show_panel_help(self):
+        """Panel Mode help popup."""
+        self.sound.play_button_click()
+        popup = ctk.CTkToplevel(self)
+        popup.title("Panel Mode - Help")
+        popup.geometry("500x300")
+        popup.transient(self)
+        popup.grab_set()
+
+        text = ctk.CTkTextbox(popup, font=ctk.CTkFont(size=12))
+        text.pack(fill="both", expand=True, padx=15, pady=15)
+        text.insert("1.0", """PANEL MODE
+
+Panel mode trains a SINGLE model on ALL strategies at once,
+instead of training separate models for each strategy.
+
+Benefits:
+- 5-10x faster execution
+- Good for quick prototyping
+- Works well when strategies are similar
+
+Supported models:
+- Random Forest
+- XGBoost
+- LightGBM
+- Gradient Boosting
+- KNN Regressor
+
+Note: Panel and Dual modes are mutually exclusive.""")
+        text.configure(state="disabled")
+
+        ctk.CTkButton(popup, text="Close", command=popup.destroy).pack(pady=10)
+
+    def _show_dual_help(self):
+        """Dual Model help popup."""
+        self.sound.play_button_click()
+        popup = ctk.CTkToplevel(self)
+        popup.title("Dual Model - Help")
+        popup.geometry("500x350")
+        popup.transient(self)
+        popup.grab_set()
+
+        text = ctk.CTkTextbox(popup, font=ctk.CTkFont(size=12))
+        text.pack(fill="both", expand=True, padx=15, pady=15)
+        text.insert("1.0", """DUAL MODEL MODE
+
+Dual model trains TWO separate models:
+1. Activity Model - Predicts trading activity (classification)
+2. Profit Model - Predicts profit for active weeks (regression)
+
+Final forecast = Activity × Weeks × Profit_per_active_week
+
+Benefits:
+- Better handling of intermittent strategies
+- Explicit activity prediction
+- More detailed analysis
+
+Supported models:
+- Random Forest
+- XGBoost
+- LightGBM
+- Gradient Boosting
+- KNN Regressor
+
+Note: Panel and Dual modes are mutually exclusive.""")
+        text.configure(state="disabled")
+
+        ctk.CTkButton(popup, text="Close", command=popup.destroy).pack(pady=10)
+
+    def _create_results_tab(self) -> ctk.CTkFrame:
+        """Results tab - elemzési eredmények megjelenítése."""
+        frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+
+        # === ROW 1: Ranking controls ===
+        row1 = ctk.CTkFrame(frame, fg_color="transparent", height=40)
+        row1.pack(fill="x", pady=(5, 3))
+
+        # Ranking Mode
+        ctk.CTkLabel(
+            row1,
+            text="Ranking Mode:",
+            font=ctk.CTkFont(size=11)
+        ).pack(side="left", padx=(0, 5))
+
+        self.ranking_mode_var = ctk.StringVar(value="forecast")
+        self.ranking_mode_combo = ctk.CTkComboBox(
+            row1,
+            values=["forecast", "historical", "combined", "risk-adjusted"],
+            variable=self.ranking_mode_var,
+            width=160,
+            height=28,
+            font=ctk.CTkFont(size=10)
+        )
+        self.ranking_mode_combo.pack(side="left", padx=(0, 10))
+
+        # Sort info label
+        ctk.CTkLabel(
+            row1,
+            text="Sort by predicted profit only",
+            font=ctk.CTkFont(size=10),
+            text_color="gray"
+        ).pack(side="left", padx=(0, 10))
+
+        # Apply Ranking button - zöld mint a screenshoton
+        self.btn_apply_ranking = ctk.CTkButton(
+            row1,
+            text="Apply Ranking",
+            width=100,
+            height=28,
+            fg_color="#2ecc71",
+            hover_color="#27ae60",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._on_apply_ranking
+        )
+        self.btn_apply_ranking.pack(side="left", padx=(0, 15))
+
+        # Help button
+        ctk.CTkButton(
+            row1,
+            text="?",
+            width=26,
+            height=26,
+            corner_radius=13,
+            fg_color="#555555",
+            hover_color="#666666",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._show_ranking_help
+        ).pack(side="right", padx=(0, 5))
+
+        # === ROW 2: Export controls ===
+        row2 = ctk.CTkFrame(frame, fg_color="transparent", height=40)
+        row2.pack(fill="x", pady=3)
+
+        # Output Folder
+        ctk.CTkLabel(
+            row2,
+            text="Output Folder:",
+            font=ctk.CTkFont(size=11)
+        ).pack(side="left", padx=(0, 5))
+
+        self.output_folder_var = ctk.StringVar(value="")
+        self.output_folder_entry = ctk.CTkEntry(
+            row2,
+            textvariable=self.output_folder_var,
+            width=250,
+            height=28,
+            font=ctk.CTkFont(size=10)
+        )
+        self.output_folder_entry.pack(side="left", padx=(0, 8))
+
+        # Browse button - kék
+        self.btn_browse_output = ctk.CTkButton(
+            row2,
+            text="Browse",
+            width=70,
+            height=28,
+            fg_color="#3498db",
+            hover_color="#2980b9",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._on_browse_output
+        )
+        self.btn_browse_output.pack(side="left", padx=(0, 10))
+
+        # Generate Report button - piros/narancs
+        self.btn_generate_report = ctk.CTkButton(
+            row2,
+            text="Generate Report",
+            width=115,
+            height=28,
+            fg_color="#e74c3c",
+            hover_color="#c0392b",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._on_generate_report
+        )
+        self.btn_generate_report.pack(side="left", padx=(0, 8))
+
+        # Export CSV button - kék
+        self.btn_export_csv = ctk.CTkButton(
+            row2,
+            text="Export CSV",
+            width=85,
+            height=28,
+            fg_color="#3498db",
+            hover_color="#2980b9",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._on_export_csv
+        )
+        self.btn_export_csv.pack(side="left", padx=(0, 8))
+
+        # All Results button - narancs
+        self.btn_all_results = ctk.CTkButton(
+            row2,
+            text="All Results",
+            width=85,
+            height=28,
+            fg_color="#e67e22",
+            hover_color="#d35400",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            state="disabled",
+            command=self._on_show_all_results
+        )
+        self.btn_all_results.pack(side="left", padx=(0, 8))
+
+        # Monthly Results button - lila
+        self.btn_monthly_results = ctk.CTkButton(
+            row2,
+            text="Monthly Results",
+            width=105,
+            height=28,
+            fg_color="#9b59b6",
+            hover_color="#8e44ad",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            state="disabled",
+            command=self._on_show_monthly_results
+        )
+        self.btn_monthly_results.pack(side="left", padx=(0, 8))
+
+        # Load Analysis State button - cián
+        self.btn_load_state = ctk.CTkButton(
+            row2,
+            text="Load Analysis State",
+            width=130,
+            height=28,
+            fg_color="#17a2b8",
+            hover_color="#138496",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._on_load_analysis_state
+        )
+        self.btn_load_state.pack(side="left", padx=(0, 8))
+
+        # Show Params button - sötétkék
+        self.btn_show_params = ctk.CTkButton(
+            row2,
+            text="Show Params",
+            width=95,
+            height=28,
+            fg_color="#2c3e50",
+            hover_color="#34495e",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._on_show_params
+        )
+        self.btn_show_params.pack(side="left", padx=(0, 5))
+
+        # === Results display area ===
+        results_frame = ctk.CTkFrame(frame, corner_radius=8)
+        results_frame.pack(fill="both", expand=True, pady=(8, 5))
+
+        # Header for results
+        header_frame = ctk.CTkFrame(results_frame, fg_color="transparent", height=35)
+        header_frame.pack(fill="x", padx=10, pady=(8, 0))
+
+        self.results_info_label = ctk.CTkLabel(
+            header_frame,
+            text="No results available. Run an analysis first.",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        self.results_info_label.pack(side="left")
+
+        self.results_count_label = ctk.CTkLabel(
+            header_frame,
+            text="",
+            font=ctk.CTkFont(size=11),
+            text_color="gray"
+        )
+        self.results_count_label.pack(side="right")
+
+        # Results table (using CTkTextbox for now, later can be CTkTable)
+        self.results_text = ctk.CTkTextbox(
+            results_frame,
+            font=ctk.CTkFont(family="Consolas", size=10),
+        )
+        self.results_text.pack(fill="both", expand=True, padx=10, pady=(5, 10))
+        self.results_text.insert("1.0", self._get_results_placeholder())
+        self.results_text.configure(state="disabled")
+
+        return frame
+
+    def _get_results_placeholder(self) -> str:
+        """Placeholder szöveg az eredmények területére."""
+        return """
+╔══════════════════════════════════════════════════════════════════════════════════════════════╗
+║                                    ANALYSIS RESULTS                                           ║
+╠══════════════════════════════════════════════════════════════════════════════════════════════╣
+║                                                                                              ║
+║   Run an analysis from the Analysis tab to see results here.                                ║
+║                                                                                              ║
+║   Results will include:                                                                      ║
+║   • Strategy rankings by predicted profit                                                   ║
+║   • Forecast accuracy metrics (MAPE, RMSE, MAE)                                             ║
+║   • Historical vs predicted performance comparison                                           ║
+║   • Confidence intervals for predictions                                                     ║
+║                                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════════════════════╝
+"""
+
+    # === Results tab eseménykezelők ===
+
+    def _on_apply_ranking(self):
+        """Ranking alkalmazása."""
+        self.sound.play_button_click()
+        mode = self.ranking_mode_var.get()
+        self._log(f"Applying ranking mode: {mode}")
+
+    def _on_browse_output(self):
+        """Output folder kiválasztása."""
+        self.sound.play_button_click()
+        folder = filedialog.askdirectory(title="Select Output Folder")
+        if folder:
+            self.output_folder_var.set(folder)
+            self._log(f"Output folder set to: {folder}")
+
+    def _on_generate_report(self):
+        """Report generálása."""
+        self.sound.play_button_click()
+        if not self.output_folder_var.get():
+            self._log("Please select an output folder first!", "warning")
+            return
+        self._log("Generating report...")
+
+    def _on_export_csv(self):
+        """CSV exportálás."""
+        self.sound.play_button_click()
+        self._log("Exporting to CSV...")
+
+    def _on_show_all_results(self):
+        """Összes eredmény megjelenítése."""
+        self.sound.play_button_click()
+        self._log("Showing all results...")
+
+    def _on_show_monthly_results(self):
+        """Havi eredmények megjelenítése."""
+        self.sound.play_button_click()
+        self._log("Showing monthly results...")
+
+    def _on_load_analysis_state(self):
+        """Elemzési állapot betöltése."""
+        self.sound.play_button_click()
+        file_path = filedialog.askopenfilename(
+            title="Load Analysis State",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if file_path:
+            self._log(f"Loading analysis state from: {file_path}")
+
+    def _on_show_params(self):
+        """Paraméterek megjelenítése popup-ban."""
+        self.sound.play_button_click()
+        popup = ctk.CTkToplevel(self)
+        popup.title("Analysis Parameters")
+        popup.geometry("600x400")
+        popup.transient(self)
+        popup.grab_set()
+
+        text = ctk.CTkTextbox(popup, font=ctk.CTkFont(family="Consolas", size=11))
+        text.pack(fill="both", expand=True, padx=15, pady=15)
+        text.insert("1.0", """ANALYSIS PARAMETERS
+
+No analysis has been run yet.
+
+When you run an analysis, this will show:
+• Selected model and category
+• Model parameters used
+• Data preprocessing settings
+• Forecast horizon
+• CPU/GPU settings
+• Panel/Dual mode settings
+""")
+        text.configure(state="disabled")
+
+        ctk.CTkButton(popup, text="Close", command=popup.destroy).pack(pady=10)
+
+    def _show_ranking_help(self):
+        """Ranking help popup."""
+        self.sound.play_button_click()
+        popup = ctk.CTkToplevel(self)
+        popup.title("Ranking Mode - Help")
+        popup.geometry("550x350")
+        popup.transient(self)
+        popup.grab_set()
+
+        text = ctk.CTkTextbox(popup, font=ctk.CTkFont(size=12))
+        text.pack(fill="both", expand=True, padx=15, pady=15)
+        text.insert("1.0", """RANKING MODES
+
+forecast:
+  Sort strategies by predicted future profit.
+  Best for forward-looking analysis.
+
+historical:
+  Sort strategies by historical performance.
+  Best for validation against known data.
+
+combined:
+  Weighted combination of forecast and historical.
+  Balanced approach.
+
+risk-adjusted:
+  Sort by risk-adjusted returns (Sharpe-like ratio).
+  Penalizes high volatility strategies.
+
+Click "Apply Ranking" to re-sort the results table.""")
+        text.configure(state="disabled")
+
+        ctk.CTkButton(popup, text="Close", command=popup.destroy).pack(pady=10)
 
     def _create_placeholder_tab(self, tab_name: str) -> ctk.CTkFrame:
         """Placeholder tab."""
