@@ -1,0 +1,92 @@
+# =============================================================================
+# MBO Trading Strategy Analyzer - Docker Compose
+# =============================================================================
+# Hasznalat:
+#   docker-compose up -d          # Inditas hatterben
+#   docker-compose up             # Inditas eloterben (logokkal)
+#   docker-compose down           # Leallitas
+#   docker-compose logs -f        # Logok kovetese
+#
+# GPU tamogatassal:
+#   docker-compose --profile gpu up -d
+#
+# CPU only:
+#   docker-compose --profile cpu up -d
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ===========================================
+  # GPU VERZIO (NVIDIA CUDA)
+  # ===========================================
+  mbo-analyzer-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mbo-analyzer:latest
+    container_name: mbo-analyzer-gpu
+    profiles:
+      - gpu
+      - default
+    ports:
+      - "8501:8501"
+    volumes:
+      # Adat mappak (perzisztens)
+      - ./Data:/app/Data
+      - ./Reports:/app/Reports
+      - ./Uploads:/app/Uploads
+      # Opcionalis: config megorzese
+      - ./.streamlit:/app/.streamlit:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ===========================================
+  # CPU VERZIO (GPU nelkul)
+  # ===========================================
+  mbo-analyzer-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    image: mbo-analyzer-cpu:latest
+    container_name: mbo-analyzer-cpu
+    profiles:
+      - cpu
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./Data:/app/Data
+      - ./Reports:/app/Reports
+      - ./Uploads:/app/Uploads
+      - ./.streamlit:/app/.streamlit:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# ===========================================
+# VOLUMES (opcionalis, ha kulon tarolod)
+# ===========================================
+# volumes:
+#   mbo-data:
+#   mbo-reports:

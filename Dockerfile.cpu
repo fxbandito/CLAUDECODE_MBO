@@ -1,0 +1,67 @@
+# =============================================================================
+# MBO Trading Strategy Analyzer - Dockerfile (CPU Only)
+# =============================================================================
+# Konnyu verzio GPU nelkul, kisebb image meret.
+#
+# Hasznalat:
+#   docker build -f Dockerfile.cpu -t mbo-analyzer-cpu .
+#   docker run -p 8501:8501 mbo-analyzer-cpu
+# =============================================================================
+
+FROM python:3.11-slim-bookworm
+
+# Metaadatok
+LABEL maintainer="MBO Team"
+LABEL description="MBO Trading Strategy Analyzer - Streamlit Web UI (CPU Only)"
+LABEL version="3.40.0"
+
+# Kornyezeti valtozok
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Rendszer fuggosegek (minimalis)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Munkamappa
+WORKDIR /app
+
+# Requirements elso (cache optimalizacio)
+COPY src/requirements.txt /app/src/requirements.txt
+
+# Python fuggosegek
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r src/requirements.txt
+
+# PyTorch CPU verzio (kisebb meret)
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# Alkalmazas masolasa
+COPY . /app/
+
+# Mappak letrehozasa
+RUN mkdir -p /app/Data /app/Reports /app/Uploads
+
+# Streamlit konfiguracio
+RUN mkdir -p /root/.streamlit
+RUN echo '[server]\n\
+headless = true\n\
+port = 8501\n\
+address = "0.0.0.0"\n\
+enableCORS = false\n\
+\n\
+[browser]\n\
+gatherUsageStats = false\n\
+' > /root/.streamlit/config.toml
+
+# Port
+EXPOSE 8501
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8501/_stcore/health || exit 1
+
+# Inditas
+CMD ["streamlit", "run", "src/web_ui.py"]

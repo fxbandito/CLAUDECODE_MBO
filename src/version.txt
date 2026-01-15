@@ -1,0 +1,5 @@
+v5.0.0
+- Teljes újraírás tiszta architektúrával
+- 13 kategória, 86 önálló model
+- Minden model saját konfiggal (nincs közös parameter file)
+- CustomTkinter GUI

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gemini_mbo"
+version = "4.4.0"
+authors = [
+  { name="MBO Team", email="info@example.com" },
+]
+description = "MBO Trading Strategy Analyzer"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "streamlit",
+    "pandas",
+    "numpy",
+    "customtkinter",
+    "torch"
+    # Add other dependencies from requirements.txt as needed
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

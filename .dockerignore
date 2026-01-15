@@ -1,0 +1,63 @@
+# =============================================================================
+# Docker Ignore - Ezek nem kerulnek be az image-be
+# =============================================================================
+
+# Git
+.git
+.gitignore
+
+# Python cache
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual environment
+venv/
+.venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Local config (ne irja felul a kontenerbelit)
+# .streamlit/secrets.toml
+
+# Teszt adatok (tul nagy lehet)
+testdata/
+*.parquet
+*.xlsx
+
+# Dokumentacio (nem kell a futashoz)
+*.md
+!README.md
+Report/
+docs/
+
+# Windows scriptek (nem kellenek Linux kontenerben)
+*.bat
+*.ps1
+
+# Cloudflare binaris
+cloudflared*
+
+# Temp fajlok
+*.tmp
+*.temp
+.cache/
