@@ -2,14 +2,26 @@
 MBO Trading Strategy Analyzer - Fő Alkalmazás Osztály
 7 tab: Data Loading, Analysis, Results, Comparison, Inspection, Performance, Optuna
 """
+# pylint: disable=too-many-instance-attributes,attribute-defined-outside-init
+# pylint: disable=too-many-statements,broad-exception-caught,unnecessary-lambda
 
+import gc
 import os
-import customtkinter as ctk
-from typing import Dict
+import threading
 from datetime import datetime
+from tkinter import filedialog
+from typing import Dict, Optional
+
+import customtkinter as ctk
+import pandas as pd
 from PIL import Image
 
+from data.loader import DataLoader
+from data.processor import DataProcessor
+from gui.settings import SettingsManager
 from gui.sorrend_data import get_settings
+from gui.sound_manager import get_sound_manager
+from gui.translate import get_translator, tr
 
 
 def get_version() -> str:
@@ -32,24 +44,50 @@ class MBOApp(ctk.CTk):
     MIN_HEIGHT = 700
 
     # Tab nevek
-    TAB_NAMES = ["Data Loading", "Analysis", "Results", "Comparison", "Inspection", "Performance", "Optuna"]
+    TAB_NAMES = [
+        "Data Loading", "Analysis", "Results", "Comparison",
+        "Inspection", "Performance", "Optuna"
+    ]
 
     def __init__(self):
         super().__init__()
+
+        # Settings manager
+        self.settings = SettingsManager()
+
+        # Sound manager
+        self.sound = get_sound_manager()
+
+        # Translator
+        self.translator = get_translator()
 
         # Verzió
         self.version = get_version()
 
         # Ablak beállítások
         self.title(f"MBO Trading Strategy Analyzer {self.version}")
-        self.geometry(f"{self.DEFAULT_WIDTH}x{self.DEFAULT_HEIGHT}")
+        self._restore_window_geometry()
         self.minsize(self.MIN_WIDTH, self.MIN_HEIGHT)
 
+        # Bezárás kezelése
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
         # Állapot változók
-        self.current_language = "EN"
-        self.is_dark_mode = True
-        self.is_muted = True
+        self.current_language = self.settings.get_language()
+        self.is_dark_mode = self.settings.get_dark_mode()
+        self.is_muted = self.settings.get_muted()
         self.current_tab = "Data Loading"
+
+        # Set language in translator
+        self.translator.set_language(self.current_language)
+
+        # Set sound enabled based on muted state
+        self.sound.set_enabled(not self.is_muted)
+
+        # Adatok
+        self.raw_data: Optional[pd.DataFrame] = None
+        self.processed_data: Optional[pd.DataFrame] = None
+        self.data_lock = threading.Lock()
 
         # Tab és gomb referenciák
         self.tabs: Dict[str, ctk.CTkFrame] = {}
@@ -65,9 +103,82 @@ class MBOApp(ctk.CTk):
         self._create_content_area()
         self._create_log_panel()
 
+        # Beállítások alkalmazása
+        self._apply_saved_settings()
+
         # Első tab megjelenítése
         self._show_tab("Data Loading")
-        self._log("Application started. Ready.")
+        self._log(tr("Application started. Ready."))
+
+        # App start sound
+        self.sound.play_app_start()
+
+    def tr(self, text: str) -> str:
+        """Translate text to current language."""
+        return self.translator.tr(text)
+
+    def _restore_window_geometry(self):
+        """Ablak méret és pozíció visszaállítása."""
+        geom = self.settings.get_window_geometry()
+        width = geom.get("width", self.DEFAULT_WIDTH)
+        height = geom.get("height", self.DEFAULT_HEIGHT)
+        x = geom.get("x")
+        y = geom.get("y")
+
+        if x is not None and y is not None:
+            self.geometry(f"{width}x{height}+{x}+{y}")
+        else:
+            self.geometry(f"{width}x{height}")
+
+    def _apply_saved_settings(self):
+        """Mentett beállítások alkalmazása."""
+        # Dark mode
+        if self.is_dark_mode:
+            self.switch_theme.select()
+            ctk.set_appearance_mode("dark")
+        else:
+            self.switch_theme.deselect()
+            ctk.set_appearance_mode("light")
+
+        # Language
+        if self.current_language == "EN":
+            self.switch_lang.select()
+            self.label_en.configure(text_color="white")
+            self.label_hu.configure(text_color="gray")
+        else:
+            self.switch_lang.deselect()
+            self.label_en.configure(text_color="gray")
+            self.label_hu.configure(text_color="white")
+
+        # Mute
+        self.var_muted.set(self.is_muted)
+
+        # Feature mode
+        saved_mode = self.settings.get_feature_mode()
+        self.feature_var.set(saved_mode)
+        self._update_feature_info()
+
+    def _save_settings_now(self):
+        """Save settings immediately (crash protection)."""
+        self.settings.set_window_geometry(
+            self.winfo_width(),
+            self.winfo_height(),
+            self.winfo_x(),
+            self.winfo_y()
+        )
+        self.settings.set_language(self.current_language)
+        self.settings.set_dark_mode(self.is_dark_mode)
+        self.settings.set_muted(self.is_muted)
+        self.settings.set_feature_mode(self.feature_var.get())
+        self.settings.save()
+
+    def _on_close(self):
+        """Ablak bezárásakor beállítások mentése."""
+        self.sound.play_app_close()
+        self._save_settings_now()
+        self._log(tr("Settings saved."))
+        self.sound.shutdown()
+        self.destroy()
 
     def _setup_icon(self):
         """Ablak ikon beállítása."""
@@ -116,7 +227,6 @@ class MBOApp(ctk.CTk):
                 self.logo_label = ctk.CTkLabel(self.logo_frame, text="", image=self.logo_image)
                 self.logo_label.pack(side="left")
         except Exception:
-            # Fallback szöveg logo
             self.logo_label = ctk.CTkLabel(
                 self.logo_frame,
                 text="MBO",
@@ -129,7 +239,6 @@ class MBOApp(ctk.CTk):
         self.sorrend_frame = ctk.CTkFrame(self.header_frame, fg_color="transparent")
         self.sorrend_frame.pack(side="left", padx=15)
 
-        # H-K label
         self.label_hk = ctk.CTkLabel(
             self.sorrend_frame,
             text="H-K",
@@ -138,7 +247,6 @@ class MBOApp(ctk.CTk):
         )
         self.label_hk.pack(side="left", padx=(0, 3))
 
-        # Switch
         self.switch_sorrend_mode = ctk.CTkSwitch(
             self.sorrend_frame,
             text="",
@@ -147,7 +255,6 @@ class MBOApp(ctk.CTk):
         )
         self.switch_sorrend_mode.pack(side="left", padx=(0, 3))
 
-        # SZ-P label
         self.label_szp = ctk.CTkLabel(
             self.sorrend_frame,
             text="SZ-P",
@@ -156,7 +263,6 @@ class MBOApp(ctk.CTk):
         )
         self.label_szp.pack(side="left", padx=(0, 8))
 
-        # Szám input (0-6143, max 4 digit)
         self.entry_sorrend_no = ctk.CTkEntry(
             self.sorrend_frame,
             width=55,
@@ -167,7 +273,6 @@ class MBOApp(ctk.CTk):
         self.entry_sorrend_no.pack(side="left", padx=(0, 8))
         self.entry_sorrend_no.bind("<KeyRelease>", self._on_sorrend_input_change)
 
-        # Eredmény label (zöld, zárójelben)
         self.lbl_sorrend_result = ctk.CTkLabel(
             self.sorrend_frame,
             text="(....)",
@@ -204,17 +309,15 @@ class MBOApp(ctk.CTk):
         self.controls_frame = ctk.CTkFrame(self.header_frame, fg_color="transparent")
         self.controls_frame.pack(side="right", padx=15)
 
-        # Dark Mode toggle
         self.switch_theme = ctk.CTkSwitch(
             self.controls_frame,
-            text="Dark Mode",
+            text=tr("Dark Mode"),
             font=ctk.CTkFont(size=11),
             command=self._on_dark_mode_toggle
         )
         self.switch_theme.select()
         self.switch_theme.pack(side="right", padx=(15, 0))
 
-        # EN label
         self.label_en = ctk.CTkLabel(
             self.controls_frame,
             text="EN",
@@ -223,17 +326,15 @@ class MBOApp(ctk.CTk):
         )
         self.label_en.pack(side="right", padx=(0, 5))
 
-        # Nyelv switch
         self.switch_lang = ctk.CTkSwitch(
             self.controls_frame,
             text="",
             width=40,
             command=self._on_language_change
         )
-        self.switch_lang.select()  # EN alapértelmezett
+        self.switch_lang.select()
         self.switch_lang.pack(side="right", padx=(0, 3))
 
-        # HU label
         self.label_hu = ctk.CTkLabel(
             self.controls_frame,
             text="HU",
@@ -242,11 +343,10 @@ class MBOApp(ctk.CTk):
         )
         self.label_hu.pack(side="right", padx=(0, 3))
 
-        # Mute checkbox
         self.var_muted = ctk.BooleanVar(value=True)
         self.chk_mute = ctk.CTkCheckBox(
             self.controls_frame,
-            text="Mute",
+            text=tr("Mute"),
             variable=self.var_muted,
             font=ctk.CTkFont(size=11),
             command=self._on_mute_toggle,
@@ -280,7 +380,6 @@ class MBOApp(ctk.CTk):
         self.content_frame.grid_rowconfigure(0, weight=1)
         self.content_frame.grid_columnconfigure(0, weight=1)
 
-        # Tab frame-ek létrehozása
         for tab_name in self.TAB_NAMES:
             if tab_name == "Data Loading":
                 tab_frame = self._create_data_tab()
@@ -299,16 +398,15 @@ class MBOApp(ctk.CTk):
 
         self.folder_label = ctk.CTkLabel(
             top_frame,
-            text="No folder selected",
+            text=tr("No folder selected"),
             font=ctk.CTkFont(size=12),
             anchor="w"
         )
         self.folder_label.pack(side="left")
 
-        # Gombok jobb oldalon
         self.btn_open_folder = ctk.CTkButton(
             top_frame,
-            text="Open Folder",
+            text=tr("Open Folder"),
             width=110,
             height=32,
             fg_color="#3498db",
@@ -319,7 +417,7 @@ class MBOApp(ctk.CTk):
 
         self.btn_open_parquet = ctk.CTkButton(
             top_frame,
-            text="Open Parquet",
+            text=tr("Open Parquet"),
             width=110,
             height=32,
             fg_color="#3498db",
@@ -330,12 +428,11 @@ class MBOApp(ctk.CTk):
 
         self.btn_convert = ctk.CTkButton(
             top_frame,
-            text="Convert Excel to Parquet",
+            text=tr("Convert Excel to Parquet"),
             width=160,
             height=32,
-            fg_color="#f39c12",
-            hover_color="#d68910",
-            text_color="black",
+            fg_color="#9b59b6",
+            hover_color="#8e44ad",
             command=self._on_convert_excel
         )
         self.btn_convert.pack(side="right", padx=5)
@@ -346,7 +443,7 @@ class MBOApp(ctk.CTk):
 
         ctk.CTkLabel(
             feature_frame,
-            text="Feature Mode:",
+            text=tr("Feature Mode:"),
             font=ctk.CTkFont(size=12)
         ).pack(side="left", padx=(0, 10))
 
@@ -354,7 +451,7 @@ class MBOApp(ctk.CTk):
 
         self.radio_original = ctk.CTkRadioButton(
             feature_frame,
-            text="Original",
+            text=tr("Original"),
             variable=self.feature_var,
             value="Original",
             command=self._on_feature_mode_change
@@ -363,7 +460,7 @@ class MBOApp(ctk.CTk):
 
         self.radio_forward = ctk.CTkRadioButton(
             feature_frame,
-            text="Forward Calc",
+            text=tr("Forward Calc"),
             variable=self.feature_var,
             value="Forward Calc",
             command=self._on_feature_mode_change
@@ -372,14 +469,13 @@ class MBOApp(ctk.CTk):
 
         self.radio_rolling = ctk.CTkRadioButton(
             feature_frame,
-            text="Rolling Window",
+            text=tr("Rolling Window"),
             variable=self.feature_var,
             value="Rolling Window",
             command=self._on_feature_mode_change
         )
         self.radio_rolling.pack(side="left", padx=10)
 
-        # ? gomb
         ctk.CTkButton(
             feature_frame,
             text="?",
@@ -387,13 +483,13 @@ class MBOApp(ctk.CTk):
             height=25,
             corner_radius=12,
             fg_color="#555555",
-            hover_color="#777777"
+            hover_color="#777777",
+            command=self._show_feature_help
         ).pack(side="left", padx=10)
 
-        # Feature info
         self.feature_info_label = ctk.CTkLabel(
             feature_frame,
-            text="No additional features - raw data only",
+            text=tr("No additional features - raw data only"),
             font=ctk.CTkFont(size=11),
             text_color="gray"
         )
@@ -412,7 +508,7 @@ class MBOApp(ctk.CTk):
 
         ctk.CTkLabel(
             files_frame,
-            text="Files:",
+            text=tr("Files:"),
             font=ctk.CTkFont(size=11),
             anchor="w"
         ).pack(anchor="w", padx=10, pady=5)
@@ -462,7 +558,7 @@ class MBOApp(ctk.CTk):
 
         ctk.CTkLabel(
             self.log_frame,
-            text="Application Log",
+            text=tr("Application Log"),
             font=ctk.CTkFont(size=11, weight="bold"),
             anchor="w"
         ).pack(anchor="w", padx=10, pady=5)
@@ -477,6 +573,7 @@ class MBOApp(ctk.CTk):
 
     def _show_tab(self, tab_name: str):
         """Tab megjelenítése."""
+        self.sound.play_tab_switch()
         self.current_tab = tab_name
 
         for name, tab in self.tabs.items():
@@ -485,7 +582,6 @@ class MBOApp(ctk.CTk):
         if tab_name in self.tabs:
             self.tabs[tab_name].grid()
 
-        # Gomb stílusok
         for name, btn in self.tab_buttons.items():
             if name == tab_name:
                 btn.configure(fg_color="#4a4a6a", text_color="#FFFFFF")
@@ -496,12 +592,11 @@ class MBOApp(ctk.CTk):
 
     def _on_sorrend_mode_change(self):
         """H-K / SZ-P mód váltás."""
+        self.sound.play_toggle_switch()
         if self.switch_sorrend_mode.get():
-            # SZ-P aktív
             self.label_szp.configure(text_color="white")
             self.label_hk.configure(text_color="gray")
         else:
-            # H-K aktív
             self.label_hk.configure(text_color="white")
             self.label_szp.configure(text_color="gray")
         self._update_sorrend_result()
@@ -509,21 +604,16 @@ class MBOApp(ctk.CTk):
     def _on_sorrend_input_change(self, _event=None):
         """Szám input változás - szűrés és validálás."""
         current_text = self.entry_sorrend_no.get()
-
-        # Csak számok
         filtered = "".join(c for c in current_text if c.isdigit())
 
-        # Max 4 karakter
         if len(filtered) > 4:
             filtered = filtered[:4]
 
-        # 0-6143 tartomány
         if filtered:
             num = int(filtered)
             if num > 6143:
                 filtered = "6143"
 
-        # Frissítés ha változott
         if filtered != current_text:
             self.entry_sorrend_no.delete(0, "end")
             self.entry_sorrend_no.insert(0, filtered)
@@ -557,6 +647,7 @@ class MBOApp(ctk.CTk):
 
     def _on_language_change(self):
         """Nyelv váltás."""
+        self.sound.play_toggle_switch()
         if self.switch_lang.get():
             self.current_language = "EN"
             self.label_en.configure(text_color="white")
@@ -565,62 +656,306 @@ class MBOApp(ctk.CTk):
             self.current_language = "HU"
             self.label_en.configure(text_color="gray")
             self.label_hu.configure(text_color="white")
+
+        self.translator.set_language(self.current_language)
         self._log(f"Language: {self.current_language}")
+        self._save_settings_now()
 
     def _on_dark_mode_toggle(self):
         """Dark mode váltás."""
+        self.sound.play_toggle_switch()
         self.is_dark_mode = self.switch_theme.get()
         mode = "dark" if self.is_dark_mode else "light"
         ctk.set_appearance_mode(mode)
+        self._save_settings_now()
 
     def _on_mute_toggle(self):
         """Mute váltás."""
         self.is_muted = self.var_muted.get()
+        self.sound.set_enabled(not self.is_muted)
+        if not self.is_muted:
+            self.sound.play_checkbox_on()
+        self._save_settings_now()
 
     # === DATA TAB ESEMÉNYEK ===
 
-    def _on_feature_mode_change(self):
-        """Feature mode váltás."""
+    def _update_feature_info(self):
+        """Update feature info label based on current mode."""
         mode = self.feature_var.get()
         info_texts = {
-            "Original": "No additional features - raw data only",
-            "Forward Calc": "Forward calculation features enabled",
-            "Rolling Window": "Rolling window aggregation enabled"
+            "Original": tr("No additional features - raw data only"),
+            "Forward Calc": tr("Features from entire history (expanding window)"),
+            "Rolling Window": tr("Features from rolling 13-week window (dynamic)")
         }
         self.feature_info_label.configure(text=info_texts.get(mode, ""))
+
+    def _on_feature_mode_change(self):
+        """Feature mode váltás."""
+        self.sound.play_button_click()
+        mode = self.feature_var.get()
+        self._update_feature_info()
         self._log(f"Feature mode: {mode}")
+        self._save_settings_now()
+
+        # Ha már van adat, újraszámoljuk a feature-öket
+        if self.raw_data is not None and not self.raw_data.empty:
+            threading.Thread(target=self._recalculate_features, daemon=True).start()
+
+    def _recalculate_features(self):
+        """Feature-ök újraszámolása háttérszálon."""
+        try:
+            self.after(0, lambda: self._log(tr("Recalculating features...")))
+
+            # Memory cleanup before recalculation
+            with self.data_lock:
+                if self.processed_data is not None:
+                    del self.processed_data
+                    self.processed_data = None
+            gc.collect()
+
+            processed = DataProcessor.clean_data(self.raw_data.copy())
+            processed = self._apply_feature_mode(processed)
+
+            with self.data_lock:
+                self.processed_data = processed
+
+            # Log feature count
+            feat_count = DataProcessor.get_feature_count(processed)
+            if feat_count > 0:
+                feat_msg = f"{tr('Features added:')} {feat_count} {tr('new columns')}"
+                self.after(0, lambda m=feat_msg: self._log(m))
+
+            self.after(0, self._update_data_ui)
+
+        except Exception as e:
+            self.after(0, lambda: self._log(f"{tr('Feature calculation error:')} {e}", "warning"))
+
+    def _apply_feature_mode(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Feature mode alkalmazása."""
+        mode = self.feature_var.get()
+
+        if mode == "Forward Calc":
+            return DataProcessor.add_features_forward(df)
+        if mode == "Rolling Window":
+            return DataProcessor.add_features_rolling(df, window=13)
+        return df
 
     def _on_open_folder(self):
-        """Mappa megnyitása."""
-        from tkinter import filedialog
-        folder = filedialog.askdirectory(title="Select Data Folder")
+        """Mappa megnyitása és fájlok betöltése."""
+        self.sound.play_button_click()
+        initial_dir = self.settings.get_last_folder() or None
+        folder = filedialog.askdirectory(
+            title="Select Data Folder",
+            initialdir=initial_dir
+        )
         if folder:
+            self.settings.set_last_folder(folder)
+            self._save_settings_now()  # Immediate save
             self.folder_label.configure(text=folder)
-            self._log(f"Folder: {folder}")
-            self._load_folder_files(folder)
+            self._log(f"{tr('Loading folder:')} {folder}")
+            threading.Thread(target=self._load_folder, args=(folder,), daemon=True).start()
+
+    def _load_folder(self, folder: str):
+        """Mappa betöltése háttérszálon."""
+        try:
+            self.after(0, lambda: self.set_progress(0.1))
+
+            self.raw_data = DataLoader.load_folder(folder)
+
+            if self.raw_data is not None and not self.raw_data.empty:
+                self.after(0, lambda: self.set_progress(0.5))
+
+                processed = DataProcessor.clean_data(self.raw_data)
+                processed = self._apply_feature_mode(processed)
+
+                with self.data_lock:
+                    self.processed_data = processed
+
+                self.after(0, lambda: self.set_progress(0.9))
+                self.after(0, self._update_data_ui)
+
+                summary = DataProcessor.get_data_summary(processed)
+                rows = summary['rows']
+                strats = summary['strategies']
+                files = summary['files']
+                loaded = tr('Loaded:')
+                r_txt, s_txt, f_txt = tr('rows'), tr('strategies'), tr('files')
+                msg = f"{loaded} {rows} {r_txt}, {strats} {s_txt}, {files} {f_txt}"
+                if summary['features'] > 0:
+                    msg += f", {summary['features']} features"
+                self.after(0, lambda m=msg: self._log(m))
+                self.after(0, lambda: self.sound.play_model_complete())
+            else:
+                self.after(0, lambda: self._log(tr("No data found in folder."), "warning"))
+
+            self.after(0, lambda: self.set_progress(0))
+
+        except Exception as e:
+            self.after(0, lambda: self._log(f"{tr('Error loading folder:')} {e}", "critical"))
+            self.after(0, lambda: self.set_progress(0))
 
     def _on_open_parquet(self):
-        """Parquet fájl megnyitása."""
-        from tkinter import filedialog
-        file = filedialog.askopenfilename(
-            title="Select Parquet File",
-            filetypes=[("Parquet files", "*.parquet"), ("All files", "*.*")]
+        """Parquet fájl(ok) megnyitása."""
+        self.sound.play_button_click()
+        initial_dir = self.settings.get_last_parquet_folder() or None
+        files = filedialog.askopenfilenames(
+            title="Select Parquet Files",
+            filetypes=[("Parquet files", "*.parquet"), ("All files", "*.*")],
+            initialdir=initial_dir
         )
-        if file:
-            self._log(f"Parquet: {file}")
+        if files:
+            self.settings.set_last_parquet_folder(os.path.dirname(files[0]))
+            self._save_settings_now()  # Immediate save
+            self.folder_label.configure(text=f"{len(files)} {tr('parquet file(s) selected')}")
+            self._log(f"{tr('Loading files...')} ({len(files)} parquet)")
+            threading.Thread(target=self._load_parquet_files, args=(files,), daemon=True).start()
+
+    def _load_parquet_files(self, files: tuple):
+        """Parquet fájlok betöltése háttérszálon."""
+        try:
+            self.after(0, lambda: self.set_progress(0.1))
+
+            self.raw_data = DataLoader.load_parquet_files(list(files))
+
+            if self.raw_data is not None and not self.raw_data.empty:
+                self.after(0, lambda: self.set_progress(0.5))
+
+                processed = DataProcessor.clean_data(self.raw_data)
+                processed = self._apply_feature_mode(processed)
+
+                with self.data_lock:
+                    self.processed_data = processed
+
+                self.after(0, lambda: self.set_progress(0.9))
+                self.after(0, self._update_data_ui)
+
+                summary = DataProcessor.get_data_summary(processed)
+                rows = summary['rows']
+                strats = summary['strategies']
+                msg = f"{tr('Loaded:')} {rows} {tr('rows')}, {strats} {tr('strategies')}"
+                if summary['features'] > 0:
+                    msg += f", {summary['features']} features"
+                self.after(0, lambda m=msg: self._log(m))
+                self.after(0, lambda: self.sound.play_model_complete())
+            else:
+                no_data_msg = tr("No data in parquet files.")
+                self.after(0, lambda: self._log(no_data_msg, "warning"))
+
+            self.after(0, lambda: self.set_progress(0))
+
+        except Exception as e:
+            self.after(0, lambda: self._log(f"{tr('Error loading parquet:')} {e}", "critical"))
+            self.after(0, lambda: self.set_progress(0))
 
     def _on_convert_excel(self):
-        """Excel → Parquet konverzió."""
-        self._log("Convert Excel to Parquet clicked")
+        """Excel fájlok Parquet-ba konvertálása."""
+        self.sound.play_button_click()
+        initial_dir = self.settings.get_last_convert_folder() or None
+        folder = filedialog.askdirectory(
+            title="Select folder with Excel files to convert",
+            initialdir=initial_dir
+        )
+        if folder:
+            self.settings.set_last_convert_folder(folder)
+            self._save_settings_now()  # Immediate save
+            self._log(f"{tr('Converting Excel files in:')} {folder}")
+            threading.Thread(target=self._convert_excel, args=(folder,), daemon=True).start()
 
-    def _load_folder_files(self, folder: str):
-        """Mappa fájlok betöltése."""
-        from pathlib import Path
+    def _convert_excel(self, folder: str):
+        """Excel konverzió háttérszálon."""
+        try:
+            self.after(0, lambda: self.set_progress(0.2))
+
+            output_path, rows = DataLoader.convert_excel_to_parquet(folder)
+
+            self.after(0, lambda: self.set_progress(1.0))
+
+            filename = os.path.basename(output_path)
+            msg = f"{tr('Conversion complete! Saved:')} {filename} ({rows} {tr('rows')})"
+            self.after(0, lambda m=msg: self._log(m))
+            self.after(0, lambda: self.sound.play_model_complete())
+
+            self.after(500, lambda: self.set_progress(0))
+
+        except Exception as e:
+            self.after(0, lambda: self._log(f"{tr('Conversion error:')} {e}", "critical"))
+            self.after(0, lambda: self.set_progress(0))
+
+    def _update_data_ui(self):
+        """Data tab UI frissítése betöltött adatokkal."""
+        if self.processed_data is None or self.processed_data.empty:
+            return
+
+        # Files lista frissítése
         self.files_textbox.delete("1.0", "end")
-        folder_path = Path(folder)
-        files = list(folder_path.glob("*.xlsx")) + list(folder_path.glob("*.csv")) + list(folder_path.glob("*.parquet"))
-        for f in sorted(files):
-            self.files_textbox.insert("end", f"{f.name}\n")
+        if "SourceFile" in self.processed_data.columns:
+            files = self.processed_data["SourceFile"].unique()
+            for f in sorted(files):
+                self.files_textbox.insert("end", f"- {f}\n")
+
+        # Adat előnézet (első 50 sor)
+        self.data_preview.delete("1.0", "end")
+
+        # Oszlopok
+        cols = list(self.processed_data.columns)
+        header = " | ".join(str(c)[:12].ljust(12) for c in cols[:10])
+        if len(cols) > 10:
+            header += " | ..."
+        self.data_preview.insert("end", header + "\n")
+        self.data_preview.insert("end", "-" * len(header) + "\n")
+
+        # Adatok
+        for i in range(min(50, len(self.processed_data))):
+            row = self.processed_data.iloc[i]
+            values = [str(row[c])[:12].ljust(12) for c in cols[:10]]
+            line = " | ".join(values)
+            if len(cols) > 10:
+                line += " | ..."
+            self.data_preview.insert("end", line + "\n")
+
+    def _show_feature_help(self):
+        """Feature mode help popup megjelenítése."""
+        self.sound.play_button_click()
+        popup = ctk.CTkToplevel(self)
+        popup.title(tr("Feature Mode - Help"))
+        popup.geometry("500x400")
+        popup.transient(self)
+        popup.grab_set()
+
+        text = ctk.CTkTextbox(popup, font=ctk.CTkFont(size=12))
+        text.pack(fill="both", expand=True, padx=15, pady=15)
+
+        help_text = f"""{tr("FEATURE MODES")}
+
+1. {tr("ORIGINAL")}
+   {tr("No additional features - uses only raw data columns.")}
+   {tr("Best for: Quick analysis, baseline testing.")}
+   {tr("Speed: Fastest")}
+
+2. {tr("FORWARD CALC (Expanding Window)")}
+   {tr("Features calculated from ENTIRE history up to each point.")}
+   Features: weeks_count, active_ratio, profit_consistency,
+   total_profit, cumulative_trades, volatility, sharpe_ratio,
+   max_drawdown
+   {tr("Best for: Strategy profiling, long-term patterns.")}
+   {tr("Speed: Medium")}
+
+3. {tr("ROLLING WINDOW (13 weeks)")}
+   {tr("Features calculated from sliding 13-week window.")}
+   Features: rolling_active_ratio, rolling_profit_consistency,
+   rolling_sharpe, rolling_volatility, rolling_avg_profit,
+   rolling_momentum_4w, rolling_momentum_13w, rolling_max_dd
+   {tr("Best for: Capturing recent trends, time-series ML.")}
+   {tr("Speed: Slowest")}
+"""
+        text.insert("1.0", help_text)
+        text.configure(state="disabled")
+
+        ctk.CTkButton(
+            popup,
+            text=tr("Close"),
+            command=popup.destroy
+        ).pack(pady=10)
 
     # === LOG ===
 
@@ -628,15 +963,14 @@ class MBOApp(ctk.CTk):
         """Log üzenet timestamp-tel."""
         timestamp = datetime.now().strftime("%H:%M:%S")
 
-        # Szín beállítása szint alapján
         if level == "critical":
-            color = "#e74c3c"  # Piros
+            prefix = "[ERROR] "
         elif level == "warning":
-            color = "#f39c12"  # Narancs
+            prefix = "[WARN] "
         else:
-            color = None  # Alapértelmezett
+            prefix = ""
 
-        formatted = f"[{timestamp}] {message}\n"
+        formatted = f"[{timestamp}] {prefix}{message}\n"
         self.log_textbox.insert("end", formatted)
         self.log_textbox.see("end")
 

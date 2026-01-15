@@ -1,3 +1,31 @@
+v5.1.0 Stable
+- Pylint 10.00/10 - tiszta kód
+- Sound Manager (winsound/pygame backend)
+- Translation system (translate.py) HU/EN támogatás
+- Parallel file loading (joblib)
+- Azonnali settings mentés mappa választáskor (crash protection)
+- GC cleanup rolling features után
+- Feature count logging
+
+v5.0.3
+- Sound Manager (winsound/pygame backend)
+- Translation system (translate.py) HU/EN támogatás
+- Parallel file loading (joblib)
+- Azonnali settings mentés mappa választáskor (crash protection)
+- GC cleanup rolling features után
+- Feature count logging
+
+v5.0.2
+- Data Loading implementáció (Open Folder, Open Parquet, Convert Excel)
+- Settings Manager: ablak méret/pozíció, utolsó mappák mentése JSON-ba
+- Feature Mode: Original, Forward Calc, Rolling Window
+- DataLoader és DataProcessor osztályok
+
+v5.0.1
+- Git repository inicializálva
+- Professional logging system (main_debug.py)
+- Backup rendszer
+
 v5.0.0
 - Teljes újraírás tiszta architektúrával
 - 13 kategória, 86 önálló model
