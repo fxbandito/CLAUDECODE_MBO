@@ -448,7 +448,7 @@ class MBOApp(ctk.CTk):
         self.btn_convert = ctk.CTkButton(
             top_frame,
             text=tr("Convert Excel to Parquet"),
-            width=150,
+            width=160,
             height=28,
             fg_color="#9b59b6",
             hover_color="#8e44ad",
@@ -502,8 +502,9 @@ class MBOApp(ctk.CTk):
             width=25,
             height=25,
             corner_radius=12,
-            fg_color="#555555",
-            hover_color="#777777",
+            fg_color="#3498db",
+            hover_color="#2980b9",
+            font=ctk.CTkFont(size=11, weight="bold"),
             command=self._show_feature_help
         ).pack(side="left", padx=10)
 
@@ -559,14 +560,14 @@ class MBOApp(ctk.CTk):
         row1 = ctk.CTkFrame(frame, fg_color="transparent", height=40)
         row1.pack(fill="x", pady=(5, 3))
 
-        # Auto gomb - cián
+        # Auto gomb - kék
         self.btn_auto = ctk.CTkButton(
             row1,
             text="Auto",
             width=60,
             height=28,
-            fg_color="#17a2b8",
-            hover_color="#138496",
+            fg_color="#3498db",
+            hover_color="#2980b9",
             font=ctk.CTkFont(size=11, weight="bold"),
             command=self._on_auto_click
         )
@@ -605,26 +606,27 @@ class MBOApp(ctk.CTk):
             row1,
             values=initial_models,
             variable=self.model_var,
-            width=200,
+            width=140,
             height=28,
             font=ctk.CTkFont(size=10),
             command=self._on_model_change
         )
         self.model_combo.pack(side="left", padx=(0, 5))
 
-        # Help gomb (?)
+        # Help gomb (?) - sötét lila SOLID (mint az eredetiben)
         self.btn_model_help = ctk.CTkButton(
             row1,
             text="?",
-            width=26,
-            height=26,
-            corner_radius=13,
-            fg_color="#555555",
-            hover_color="#666666",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            width=28,
+            height=28,
+            corner_radius=14,
+            fg_color="#3d3d5c",
+            hover_color="#4d4d6c",
+            text_color="white",
+            font=ctk.CTkFont(size=12, weight="bold"),
             command=self._show_model_help
         )
-        self.btn_model_help.pack(side="left", padx=(0, 15))
+        self.btn_model_help.pack(side="left", padx=5)
 
         # BATCH MODE gomb
         self.btn_batch_mode = ctk.CTkButton(
@@ -643,46 +645,49 @@ class MBOApp(ctk.CTk):
         right_controls = ctk.CTkFrame(row1, fg_color="transparent")
         right_controls.pack(side="right")
 
-        # Run Analysis gomb - zöld
+        # Run Analysis gomb - zöld SOLID (mint az eredetiben)
         self.btn_run = ctk.CTkButton(
             right_controls,
             text="Run Analysis",
-            width=110,
+            width=180,
             height=28,
-            fg_color="#27ae60",
-            hover_color="#229954",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="green",
+            hover_color="#006400",
+            text_color="white",
+            font=ctk.CTkFont(size=14, weight="bold"),
             command=self._on_run_analysis
         )
-        self.btn_run.pack(side="right", padx=(8, 0))
+        self.btn_run.pack(side="right", padx=5)
 
-        # Pause gomb - sárga/narancs
+        # Pause gomb - sárga SOLID (mint az eredetiben)
         self.btn_pause = ctk.CTkButton(
             right_controls,
             text="Pause",
-            width=70,
+            width=120,
             height=28,
             fg_color="#f39c12",
-            hover_color="#d68910",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            hover_color="#d35400",
+            text_color="white",
+            font=ctk.CTkFont(size=14, weight="bold"),
             state="disabled",
             command=self._on_pause_analysis
         )
-        self.btn_pause.pack(side="right", padx=(8, 0))
+        self.btn_pause.pack(side="right", padx=5)
 
-        # Stop gomb - piros
+        # Stop gomb - piros SOLID (mint az eredetiben)
         self.btn_stop = ctk.CTkButton(
             right_controls,
             text="Stop",
-            width=70,
+            width=140,
             height=28,
             fg_color="#e74c3c",
             hover_color="#c0392b",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="white",
+            font=ctk.CTkFont(size=14, weight="bold"),
             state="disabled",
             command=self._on_stop_analysis
         )
-        self.btn_stop.pack(side="right", padx=(8, 0))
+        self.btn_stop.pack(side="right", padx=5)
 
         # Shutdown checkbox
         self.var_shutdown = ctk.BooleanVar(value=False)
@@ -750,9 +755,10 @@ class MBOApp(ctk.CTk):
         self.chk_panel_mode.pack(side="left", padx=(0, 3))
 
         ctk.CTkButton(
-            row2, text="?", width=22, height=22, corner_radius=11,
-            fg_color="#555555", hover_color="#777777",
-            font=ctk.CTkFont(size=10, weight="bold"),
+            row2, text="?", width=24, height=24, corner_radius=12,
+            fg_color="#3d3d5c", hover_color="#4d4d6c",
+            text_color="white",
+            font=ctk.CTkFont(size=12, weight="bold"),
             command=self._show_panel_help
         ).pack(side="left", padx=(0, 15))
 
@@ -765,12 +771,13 @@ class MBOApp(ctk.CTk):
             font=ctk.CTkFont(size=11),
             command=self._on_dual_model_change
         )
-        self.chk_dual_model.pack(side="left", padx=(0, 3))
+        self.chk_dual_model.pack(side="left", padx=(0, 5))
 
         ctk.CTkButton(
-            row2, text="?", width=22, height=22, corner_radius=11,
-            fg_color="#555555", hover_color="#777777",
-            font=ctk.CTkFont(size=10, weight="bold"),
+            row2, text="?", width=24, height=24, corner_radius=12,
+            fg_color="#3d3d5c", hover_color="#4d4d6c",
+            text_color="white",
+            font=ctk.CTkFont(size=12, weight="bold"),
             command=self._show_dual_help
         ).pack(side="left", padx=(0, 20))
 
@@ -1002,10 +1009,16 @@ class MBOApp(ctk.CTk):
         """Elemzés szüneteltetése/folytatása."""
         self.sound.play_button_click()
         if self.btn_pause.cget("text") == "Pause":
-            self.btn_pause.configure(text="Resume", fg_color="#27ae60")
+            # Resume = zöld (mint az eredetiben)
+            self.btn_pause.configure(
+                text="Resume", fg_color="#27ae60", hover_color="#2ecc71"
+            )
             self._log("Analysis paused.")
         else:
-            self.btn_pause.configure(text="Pause", fg_color="#f39c12")
+            # Pause = sárga (mint az eredetiben)
+            self.btn_pause.configure(
+                text="Pause", fg_color="#f39c12", hover_color="#d35400"
+            )
             self._log("Analysis resumed.")
 
     def _on_cpu_change(self, value: float):
@@ -1160,7 +1173,7 @@ Note: Panel and Dual modes are mutually exclusive.""")
         )
         self.btn_apply_ranking.pack(side="left", padx=(0, 15))
 
-        # Help button
+        # Help button - szürke
         ctk.CTkButton(
             row1,
             text="?",
@@ -1207,85 +1220,80 @@ Note: Panel and Dual modes are mutually exclusive.""")
         )
         self.btn_browse_output.pack(side="left", padx=(0, 10))
 
-        # Generate Report button - piros/narancs
+        # Generate Report button - zöld SOLID (mint az eredetiben)
         self.btn_generate_report = ctk.CTkButton(
             row2,
             text="Generate Report",
-            width=115,
-            height=28,
-            fg_color="#e74c3c",
-            hover_color="#c0392b",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            state="disabled",
+            fg_color="green",
+            hover_color="#006400",
+            text_color="white",
+            font=ctk.CTkFont(size=14, weight="bold"),
             command=self._on_generate_report
         )
-        self.btn_generate_report.pack(side="left", padx=(0, 8))
+        self.btn_generate_report.pack(side="left", padx=20)
 
-        # Export CSV button - kék
+        # Export CSV button - default stílus (mint az eredetiben)
         self.btn_export_csv = ctk.CTkButton(
             row2,
             text="Export CSV",
-            width=85,
-            height=28,
-            fg_color="#3498db",
-            hover_color="#2980b9",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            state="disabled",
+            font=ctk.CTkFont(size=12, weight="bold"),
             command=self._on_export_csv
         )
-        self.btn_export_csv.pack(side="left", padx=(0, 8))
+        self.btn_export_csv.pack(side="left", padx=5)
 
-        # All Results button - narancs
+        # All Results button - sárga SOLID (mint az eredetiben)
         self.btn_all_results = ctk.CTkButton(
             row2,
             text="All Results",
-            width=85,
-            height=28,
-            fg_color="#e67e22",
-            hover_color="#d35400",
+            width=95,
+            fg_color="#f39c12",
+            hover_color="#d68910",
+            text_color="black",
             font=ctk.CTkFont(size=11, weight="bold"),
             state="disabled",
             command=self._on_show_all_results
         )
-        self.btn_all_results.pack(side="left", padx=(0, 8))
+        self.btn_all_results.pack(side="left", padx=5)
 
-        # Monthly Results button - lila
+        # Monthly Results button - lila SOLID (mint az eredetiben)
         self.btn_monthly_results = ctk.CTkButton(
             row2,
             text="Monthly Results",
-            width=105,
-            height=28,
+            width=115,
             fg_color="#9b59b6",
             hover_color="#8e44ad",
+            text_color="white",
             font=ctk.CTkFont(size=11, weight="bold"),
             state="disabled",
             command=self._on_show_monthly_results
         )
-        self.btn_monthly_results.pack(side="left", padx=(0, 8))
+        self.btn_monthly_results.pack(side="left", padx=5)
 
-        # Load Analysis State button - cián
+        # Load Analysis State button - lila (mint az eredetiben)
         self.btn_load_state = ctk.CTkButton(
             row2,
             text="Load Analysis State",
-            width=130,
-            height=28,
-            fg_color="#17a2b8",
-            hover_color="#138496",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            width=180,
+            fg_color="#8e44ad",
+            hover_color="#732d91",
+            font=ctk.CTkFont(size=12, weight="bold"),
             command=self._on_load_analysis_state
         )
-        self.btn_load_state.pack(side="left", padx=(0, 8))
+        self.btn_load_state.pack(side="right", padx=10)
 
-        # Show Params button - sötétkék
+        # Show Params button - sötétkék (mint az eredetiben)
         self.btn_show_params = ctk.CTkButton(
             row2,
             text="Show Params",
-            width=95,
-            height=28,
-            fg_color="#2c3e50",
-            hover_color="#34495e",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            width=100,
+            fg_color="#34495e",
+            hover_color="#2c3e50",
+            font=ctk.CTkFont(size=12, weight="bold"),
             command=self._on_show_params
         )
-        self.btn_show_params.pack(side="left", padx=(0, 5))
+        self.btn_show_params.pack(side="right", padx=5)
 
         # === Results display area ===
         results_frame = ctk.CTkFrame(frame, corner_radius=8)

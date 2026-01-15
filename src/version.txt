@@ -1,3 +1,11 @@
+v5.2.1 Stable
+- UI gombok javítva az eredeti v4.12.8 alapján
+- Analysis tab: Stop (piros), Pause (sárga), Run Analysis (zöld) SOLID gombok
+- Analysis tab: ? gombok sötét lila (#3d3d5c) SOLID
+- Results tab: Generate Report (zöld), All Results (sárga), Monthly Results (lila) SOLID
+- Results tab: Load Analysis State (lila), Show Params (sötétkék)
+- Data Loading tab: Convert Excel to Parquet (lila #9b59b6) SOLID
+
 v5.2.0 Stable
 - Analysis tab complete (Auto, Category/Model selection, Parameters)
 - Results tab complete (Ranking, Export, Reports)
