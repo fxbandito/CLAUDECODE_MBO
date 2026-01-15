@@ -15,7 +15,6 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 import pandas as pd
 
-from analysis.engine import analyze_strategy
 from data.processor import DataProcessor
 from reporting.exporter import ReportExporter  # pylint: disable=wrong-import-order
 
@@ -748,6 +747,9 @@ class ResultsMixin:
             method = context_data.get("method", "ARIMA")
             use_gpu = params.get("use_gpu", False)
             max_horizon = params.get("forecast_horizon", 52)
+
+            # Lazy import to avoid circular dependency
+            from analysis.engine import analyze_strategy  # pylint: disable=import-outside-toplevel
 
             forecasts = analyze_strategy(
                 strat_id, strat_data, method, params,

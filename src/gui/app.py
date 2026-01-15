@@ -22,6 +22,7 @@ from gui.translate import get_translator, tr
 from gui.tabs.data_loading import DataLoadingMixin
 from gui.tabs.analysis import AnalysisMixin
 from gui.tabs.results import ResultsMixin
+from gui.tabs.comparison import ComparisonMixin
 
 
 def get_version() -> str:
@@ -34,7 +35,7 @@ def get_version() -> str:
         return "v5.0.0"
 
 
-class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ctk.CTk):
+class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ComparisonMixin, ctk.CTk):
     """Fő alkalmazás ablak - régi stílus alapján."""
 
     # Ablak konstansok
@@ -420,6 +421,8 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ctk.CTk):
                 tab_frame = self._create_analysis_tab()
             elif tab_name == "Results":
                 tab_frame = self._create_results_tab()
+            elif tab_name == "Comparison":
+                tab_frame = self._create_comparison_tab()
             else:
                 tab_frame = self._create_placeholder_tab(tab_name)
             tab_frame.grid(row=0, column=0, sticky="nsew")

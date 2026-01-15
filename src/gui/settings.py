@@ -27,6 +27,7 @@ class SettingsManager:
             "last_results_output_folder": "",
             "last_analysis_state_folder": "",
             "last_csv_export_folder": "",
+            "last_comparison_folder": "",
         },
         "preferences": {
             "language": "EN",
@@ -156,6 +157,16 @@ class SettingsManager:
         if "paths" not in self.settings:
             self.settings["paths"] = {}
         self.settings["paths"]["last_csv_export_folder"] = path
+
+    def get_last_comparison_folder(self) -> str:
+        """Get last comparison folder path."""
+        return self.settings.get("paths", {}).get("last_comparison_folder", "")
+
+    def set_last_comparison_folder(self, path: str):
+        """Save last comparison folder path."""
+        if "paths" not in self.settings:
+            self.settings["paths"] = {}
+        self.settings["paths"]["last_comparison_folder"] = path
 
     # === Preferences ===
 
