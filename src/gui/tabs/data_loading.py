@@ -151,7 +151,8 @@ class DataLoadingMixin:
 
         self.files_textbox = ctk.CTkTextbox(
             files_frame,
-            font=ctk.CTkFont(family="Consolas", size=10)
+            font=ctk.CTkFont(family="Consolas", size=10),
+            fg_color="#1a1a2e"
         )
         self.files_textbox.pack(fill="both", expand=True, padx=5, pady=(0, 5))
 
@@ -159,11 +160,19 @@ class DataLoadingMixin:
         preview_frame = ctk.CTkFrame(main_frame, corner_radius=5)
         preview_frame.grid(row=0, column=1, sticky="nsew")
 
+        ctk.CTkLabel(
+            preview_frame,
+            text=tr("Data Preview:"),
+            font=ctk.CTkFont(size=11),
+            anchor="w"
+        ).pack(anchor="w", padx=10, pady=5)
+
         self.data_preview = ctk.CTkTextbox(
             preview_frame,
-            font=ctk.CTkFont(family="Consolas", size=10)
+            font=ctk.CTkFont(family="Consolas", size=10),
+            fg_color="#1a1a2e"
         )
-        self.data_preview.pack(fill="both", expand=True, padx=5, pady=5)
+        self.data_preview.pack(fill="both", expand=True, padx=5, pady=(0, 5))
 
         return frame
 

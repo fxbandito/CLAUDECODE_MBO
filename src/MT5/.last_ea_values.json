@@ -1,0 +1,18 @@
+{
+  "Advisors\\MT5_MBO_V3.ex5": {
+    "InpLotMode": "1",
+    "InpFixedLot": "0.01",
+    "prots": "1",
+    "magic_inp": "12345",
+    "start_cand_monitor_1": "0",
+    "end_cand_monitor_1": "6",
+    "closing_can_1": "21",
+    "open_offset_1": "100",
+    "open_direction_1": "2",
+    "start_cand_monitor_2": "24",
+    "end_cand_monitor_2": "30",
+    "closing_can_2": "117",
+    "open_offset_2": "100",
+    "open_direction_2": "2"
+  }
+}

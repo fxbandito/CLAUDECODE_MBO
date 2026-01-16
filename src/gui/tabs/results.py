@@ -67,6 +67,8 @@ class ResultsMixin:
             height=28,
             fg_color="#2ecc71",
             hover_color="#27ae60",
+            text_color="white",
+            text_color_disabled="#cccccc",
             font=ctk.CTkFont(family="Arial", size=12, weight="bold"),
             state="disabled",
             command=self._on_apply_ranking
@@ -137,6 +139,7 @@ class ResultsMixin:
             fg_color="green",
             hover_color="#006400",
             text_color="white",
+            text_color_disabled="#cccccc",
             font=ctk.CTkFont(family="Arial", size=14, weight="bold"),
             command=self._on_generate_report
         )
@@ -147,6 +150,7 @@ class ResultsMixin:
             row2,
             text="Export CSV",
             state="disabled",
+            text_color_disabled="#cccccc",
             font=ctk.CTkFont(family="Arial", size=12, weight="bold"),
             command=self._on_export_csv
         )
@@ -160,6 +164,7 @@ class ResultsMixin:
             fg_color="#f39c12",
             hover_color="#d68910",
             text_color="black",
+            text_color_disabled="#666666",
             font=ctk.CTkFont(family="Arial", size=11, weight="bold"),
             state="disabled",
             command=self._on_show_all_results
@@ -174,6 +179,7 @@ class ResultsMixin:
             fg_color="#9b59b6",
             hover_color="#8e44ad",
             text_color="white",
+            text_color_disabled="#cccccc",
             font=ctk.CTkFont(family="Arial", size=11, weight="bold"),
             state="disabled",
             command=self._on_show_monthly_results

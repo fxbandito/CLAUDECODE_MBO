@@ -75,7 +75,7 @@ class AnalysisMixin:
             row1,
             values=initial_models,
             variable=self.model_var,
-            width=140,
+            width=200,
             height=28,
             font=ctk.CTkFont(size=10),
             command=self._on_model_change
@@ -137,6 +137,7 @@ class AnalysisMixin:
             fg_color="#f39c12",
             hover_color="#d35400",
             text_color="white",
+            text_color_disabled="#cccccc",
             font=ctk.CTkFont(size=14, weight="bold"),
             state="disabled",
             command=self._on_pause_analysis
@@ -152,6 +153,7 @@ class AnalysisMixin:
             fg_color="#e74c3c",
             hover_color="#c0392b",
             text_color="white",
+            text_color_disabled="#cccccc",
             font=ctk.CTkFont(size=14, weight="bold"),
             state="disabled",
             command=self._on_stop_analysis
@@ -306,6 +308,7 @@ class AnalysisMixin:
         self.model_doc_text = ctk.CTkTextbox(
             doc_frame,
             font=ctk.CTkFont(family="Consolas", size=11),
+            fg_color="#1a1a2e"
         )
         self.model_doc_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         self.model_doc_text.insert("1.0", tr("Select a model to see its documentation here."))

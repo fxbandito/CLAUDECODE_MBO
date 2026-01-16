@@ -23,6 +23,7 @@ from gui.tabs.data_loading import DataLoadingMixin
 from gui.tabs.analysis import AnalysisMixin
 from gui.tabs.results import ResultsMixin
 from gui.tabs.comparison import ComparisonMixin
+from gui.tabs.inspection import InspectionTabMixin
 
 
 def get_version() -> str:
@@ -35,7 +36,7 @@ def get_version() -> str:
         return "v5.0.0"
 
 
-class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ComparisonMixin, ctk.CTk):
+class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ComparisonMixin, InspectionTabMixin, ctk.CTk):
     """Fő alkalmazás ablak - régi stílus alapján."""
 
     # Ablak konstansok
@@ -224,8 +225,8 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ComparisonMixin, ctk
         """Fő layout grid konfiguráció."""
         self.grid_rowconfigure(0, weight=0)  # Header - fix
         self.grid_rowconfigure(1, weight=0)  # Progress bar - fix
-        self.grid_rowconfigure(2, weight=1)  # Content - növekszik
-        self.grid_rowconfigure(3, weight=0)  # Log panel - fix
+        self.grid_rowconfigure(2, weight=2)  # Content - növekszik (kevésbé)
+        self.grid_rowconfigure(3, weight=1)  # Log panel - növekszik
         self.grid_columnconfigure(0, weight=1)
 
     def _create_header(self):
@@ -423,6 +424,8 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ComparisonMixin, ctk
                 tab_frame = self._create_results_tab()
             elif tab_name == "Comparison":
                 tab_frame = self._create_comparison_tab()
+            elif tab_name == "Inspection":
+                tab_frame = self._create_inspection_tab()
             else:
                 tab_frame = self._create_placeholder_tab(tab_name)
             tab_frame.grid(row=0, column=0, sticky="nsew")
@@ -449,9 +452,8 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ComparisonMixin, ctk
 
     def _create_log_panel(self):
         """Application Log panel."""
-        self.log_frame = ctk.CTkFrame(self, height=200, corner_radius=0)
-        self.log_frame.grid(row=3, column=0, sticky="ew", padx=20, pady=(10, 20))
-        self.log_frame.grid_propagate(False)
+        self.log_frame = ctk.CTkFrame(self, corner_radius=0)
+        self.log_frame.grid(row=3, column=0, sticky="nsew", padx=20, pady=(10, 20))
 
         ctk.CTkLabel(
             self.log_frame,
@@ -462,7 +464,8 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ComparisonMixin, ctk
 
         self.log_textbox = ctk.CTkTextbox(
             self.log_frame,
-            font=ctk.CTkFont(family="Consolas", size=11)
+            font=ctk.CTkFont(family="Consolas", size=11),
+            fg_color="#1a1a2e"
         )
         self.log_textbox.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 

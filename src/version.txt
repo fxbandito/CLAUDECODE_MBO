@@ -1,3 +1,9 @@
+v5.4.0 Stable
+- Inspection tab implementáció
+- InspectionEngine: MD report parsing, Excel benchmark parsing, comparison
+- MT5 Tester integráció (külön GUI ablak)
+- Treeview eredmény tábla színkódolással
+
 v5.3.2 Stable
 - Comparison tab teljes implementáció
 - comparator modul (base, horizon, main_data, main_data_ar, main_data_mr)
