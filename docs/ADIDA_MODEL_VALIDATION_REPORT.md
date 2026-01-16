@@ -26,6 +26,31 @@ Az ADIDA modell sikeresen implementalva es tesztelve lett. Minden teszt sikerese
 - **Feature Mode Ellenorzes**: A modell figyelmezteti a felhasznalot ha Forward Calc vagy Rolling Window modban van
 - **GUI Kapcsolok**: GPU, Panel Mode, Dual Mode kapcsolok automatikusan letiltodnak ha a modell nem tamogatja
 - **Batch Mode**: Parhuzamos feldolgozas joblib-bal (max 8 szal)
+- **Utils Integracios**: Teljes integracios az uj `models/utils/` modulokkal
+
+### 1.2 Utils Modulus Integracios (uj architektura)
+
+Az ADIDA modell az elso, ami használja az uj utils modulokat:
+
+| Modul | Funkcionalitas | Hasznalat ADIDA-ban |
+|-------|----------------|---------------------|
+| `postprocessing.py` | NaN kezeles, outlier capping | `self.postprocess()` |
+| `aggregation.py` | Horizont aggregatumok (h1-h52) | `self.calculate_horizons()` |
+| `validation.py` | Input validalas | `self.validate_input()` |
+| `monitoring.py` | Teljesitmeny meres | `self.create_timer()` |
+
+**Uj metodus - `forecast_with_pipeline()`:**
+```python
+result = model.forecast_with_pipeline(
+    data=profit_series,
+    steps=52,
+    params={"method": "croston"},
+    strategy_id="STR_001"
+)
+# Visszaad: {"Forecast_1W", "Forecast_1M", ..., "Success", "Error"}
+```
+
+Ez a metodus a regi `strategy_analyzer.py` teljes funkcionalitasat biztositja egyetlen hivassal.
 
 ---
 
@@ -255,5 +280,21 @@ A modell készen áll a produkcióra.
 ---
 
 **Készítette:** Claude Opus 4.5
-**Verzió:** 1.0
+**Verzió:** 2.0 (Utils Integracios)
 **Utolsó frissítés:** 2026-01-16
+
+---
+
+## Appendix: Uj Fajlok
+
+### Models Utils (a regi strategy_analyzer.py funkcionalitasa)
+- `src/models/utils/__init__.py` - Kozponti export
+- `src/models/utils/postprocessing.py` - NaN kezeles, outlier capping
+- `src/models/utils/aggregation.py` - Horizont aggregatumok
+- `src/models/utils/validation.py` - Input validalas
+- `src/models/utils/monitoring.py` - Teljesitmeny monitoring
+- `src/models/utils/README.md` - Dokumentacios
+
+### ADIDA Model
+- `src/models/statistical/adida.py` - Teljes implementacios
+- `tests/test_adida_model.py` - Validaciós tesztek

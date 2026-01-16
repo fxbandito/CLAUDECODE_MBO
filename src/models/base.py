@@ -8,6 +8,31 @@ Nincs közös config fájl, nincs keveredés!
 Elérhető utility függvények a modell implementációkhoz:
 =========================================================
 
+Model Utilities (src/models/utils/):
+    from models.utils import (
+        # Postprocessing - Forecast utófeldolgozás
+        postprocess_forecasts,      # Teljes utófeldolgozás (NaN, outlier, clip)
+        handle_nan_values,          # NaN/Inf kezelés
+        cap_outliers,               # 3×IQR outlier capping
+        PostprocessingConfig,       # Egyedi konfiguráció
+
+        # Aggregation - Horizont aggregátumok
+        calculate_horizons,         # Standard horizontok (h1, h4, h13, h26, h52)
+        HorizonResult,              # Eredmény dataclass
+        STANDARD_HORIZONS,          # {h1: 1, h4: 4, ...}
+
+        # Validation - Input validálás
+        validate_input_data,        # Adat validálás
+        prepare_forecast_data,      # Egyszerűsített előkészítés
+        ValidationResult,           # Eredmény dataclass
+        MIN_DATA_POINTS,            # 24 (minimum adatpont)
+
+        # Monitoring - Teljesítmény mérés
+        ForecastTimer,              # Context manager időméréshez
+        log_slow_forecast,          # Lassú forecast logolás
+        PerformanceStats,           # Statisztika dataclass
+    )
+
 Process Management (src/analysis/process_utils.py):
     from analysis.process_utils import (
         cleanup_cuda_context,        # CUDA memória cleanup
@@ -36,7 +61,7 @@ Resource Manager (src/analysis/engine.py):
 import logging
 import os
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, TYPE_CHECKING
+from typing import List, Dict, Any, Optional, Union, TYPE_CHECKING
 from dataclasses import dataclass
 
 if TYPE_CHECKING:
@@ -97,8 +122,16 @@ class BaseModel(ABC):
             }
 
             def forecast(self, data, steps, params):
-                # implementáció
-                pass
+                # Validálás
+                validation = self.validate_input(data)
+                if not validation.is_valid:
+                    return [0.0] * steps
+
+                # Forecast logika...
+                raw_forecasts = self._run_arima(validation.processed_data, steps, params)
+
+                # Utófeldolgozás
+                return self.postprocess(raw_forecasts)
     """
 
     # Ezeket KELL definiálni minden leszármazottban
@@ -143,6 +176,278 @@ class BaseModel(ABC):
         Returns:
             Előrejelzett értékek listája (hossza = steps)
         """
+
+    # =========================================================================
+    # UTILITY WRAPPER METÓDUSOK - A models/utils modulok egyszerű elérése
+    # =========================================================================
+
+    def validate_input(
+        self,
+        data: Union[List[float], "np.ndarray", "pd.Series"],
+        min_points: Optional[int] = None
+    ) -> "ValidationResult":
+        """
+        Input adat validálása.
+
+        Wrapper a models.utils.validation.validate_input_data függvényhez.
+
+        Args:
+            data: Bemeneti idősor
+            min_points: Minimum adatpontok (None = kategória alapján)
+
+        Returns:
+            ValidationResult objektum
+
+        Example:
+            def forecast(self, data, steps, params):
+                validation = self.validate_input(data)
+                if not validation.is_valid:
+                    logger.warning("Invalid input: %s", validation.error_message)
+                    return [0.0] * steps
+                clean_data = validation.processed_data
+                # ...
+        """
+        from models.utils.validation import validate_input_data, RECOMMENDED_MIN_POINTS
+
+        # Kategória alapú minimum pontok
+        if min_points is None:
+            category = self.MODEL_INFO.category.lower()
+            if "deep learning" in category:
+                min_points = RECOMMENDED_MIN_POINTS.get("deep_learning", 100)
+            elif "machine learning" in category:
+                min_points = RECOMMENDED_MIN_POINTS.get("ml", 50)
+            elif "spectral" in category or "frequency" in category:
+                min_points = RECOMMENDED_MIN_POINTS.get("spectral", 32)
+            elif "smoothing" in category:
+                min_points = RECOMMENDED_MIN_POINTS.get("smoothing", 12)
+            else:
+                min_points = RECOMMENDED_MIN_POINTS.get("statistical", 24)
+
+        return validate_input_data(data, min_points=min_points)
+
+    def postprocess(
+        self,
+        forecasts: Union[List[float], "np.ndarray"],
+        allow_negative: bool = True,
+        cap_outliers: bool = True,
+        iqr_multiplier: float = 3.0
+    ) -> List[float]:
+        """
+        Forecast utófeldolgozás.
+
+        Wrapper a models.utils.postprocessing.postprocess_forecasts függvényhez.
+        A régi strategy_analyzer.py 464-490. sorának funkcionalitása.
+
+        Args:
+            forecasts: Nyers forecast értékek
+            allow_negative: Negatív értékek engedélyezése (default: True)
+            cap_outliers: Outlier capping (default: True)
+            iqr_multiplier: IQR szorzó (default: 3.0)
+
+        Returns:
+            Tisztított forecast lista
+
+        Example:
+            def forecast(self, data, steps, params):
+                raw_forecasts = self._run_model(data, steps)
+                return self.postprocess(raw_forecasts)
+        """
+        from models.utils.postprocessing import postprocess_forecasts, PostprocessingConfig
+
+        config = PostprocessingConfig(
+            handle_nan=True,
+            handle_inf=True,
+            cap_outliers=cap_outliers,
+            iqr_multiplier=iqr_multiplier,
+            allow_negative=allow_negative,
+        )
+
+        return postprocess_forecasts(forecasts, config)
+
+    def calculate_horizons(
+        self,
+        forecasts: Union[List[float], "np.ndarray"],
+        allow_negative: bool = True
+    ) -> "HorizonResult":
+        """
+        Horizont aggregátumok számítása.
+
+        Wrapper a models.utils.aggregation.calculate_horizons függvényhez.
+        A régi strategy_analyzer.py 492-497. sorának funkcionalitása.
+
+        Args:
+            forecasts: Forecast értékek
+            allow_negative: Negatív összegek engedélyezése
+
+        Returns:
+            HorizonResult objektum (h1, h4, h13, h26, h52)
+
+        Example:
+            forecasts = self.forecast(data, steps=52, params=params)
+            horizons = self.calculate_horizons(forecasts)
+            print(f"1 month forecast: {horizons.h4}")
+        """
+        from models.utils.aggregation import calculate_horizons
+        return calculate_horizons(forecasts, allow_negative=allow_negative)
+
+    def create_timer(
+        self,
+        strategy_id: Optional[str] = None,
+        data_points: int = 0
+    ) -> "ForecastTimer":
+        """
+        Teljesítmény timer létrehozása.
+
+        Wrapper a models.utils.monitoring.ForecastTimer osztályhoz.
+        A régi strategy_analyzer.py 512-517. sorának funkcionalitása.
+
+        Args:
+            strategy_id: Stratégia azonosító
+            data_points: Adatpontok száma
+
+        Returns:
+            ForecastTimer context manager
+
+        Example:
+            def forecast(self, data, steps, params):
+                with self.create_timer("STR_001", len(data)) as timer:
+                    result = self._run_model(data, steps)
+                return result
+        """
+        from models.utils.monitoring import ForecastTimer
+        return ForecastTimer(
+            model_name=self.MODEL_INFO.name,
+            strategy_id=strategy_id,
+            data_points=data_points
+        )
+
+    # =========================================================================
+    # FORECAST WITH FULL PIPELINE
+    # =========================================================================
+
+    def forecast_with_pipeline(
+        self,
+        data: Union[List[float], "np.ndarray", "pd.Series"],
+        steps: int,
+        params: Dict[str, Any],
+        strategy_id: Optional[str] = None,
+        postprocess: bool = True,
+        allow_negative: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Teljes forecast pipeline: validálás → forecast → utófeldolgozás → aggregálás.
+
+        Ez a metódus a régi strategy_analyzer.py teljes funkcionalitását biztosítja
+        egyetlen hívással.
+
+        Args:
+            data: Bemeneti idősor
+            steps: Előrejelzési horizont
+            params: Modell paraméterek
+            strategy_id: Stratégia azonosító (opcionális)
+            postprocess: Utófeldolgozás végrehajtása (default: True)
+            allow_negative: Negatív értékek engedélyezése (default: True)
+
+        Returns:
+            Dictionary a régi strategy_analyzer.py kimenetével kompatibilis formátumban:
+            {
+                "No.": strategy_id,
+                "Forecast_1W": h1,
+                "Forecast_1M": h4,
+                "Forecast_3M": h13,
+                "Forecast_6M": h26,
+                "Forecast_12M": h52,
+                "Method": model_name,
+                "Forecasts": [list of forecasts],
+                "Success": True/False,
+                "Error": None or error message
+            }
+
+        Example:
+            model = ARIMAModel()
+            result = model.forecast_with_pipeline(
+                data=profit_series,
+                steps=52,
+                params={"p": 1, "d": 1, "q": 1},
+                strategy_id="STR_001"
+            )
+            print(f"1 month forecast: {result['Forecast_1M']}")
+        """
+        import numpy as np
+
+        # 1. Validálás
+        validation = self.validate_input(data)
+        if not validation.is_valid:
+            logger.warning(
+                "Strategy %s: skipped (%s)",
+                strategy_id or "unknown",
+                validation.error_message
+            )
+            return {
+                "No.": strategy_id,
+                "Forecast_1W": 0.0,
+                "Forecast_1M": 0.0,
+                "Forecast_3M": 0.0,
+                "Forecast_6M": 0.0,
+                "Forecast_12M": 0.0,
+                "Method": self.MODEL_INFO.name,
+                "Forecasts": [0.0] * steps,
+                "Success": False,
+                "Error": validation.error_message,
+            }
+
+        # 2. Forecast időméréssel
+        try:
+            with self.create_timer(strategy_id, validation.processed_length):
+                raw_forecasts = self.forecast(
+                    validation.processed_data,
+                    steps,
+                    params
+                )
+        except Exception as e:
+            logger.error(
+                "Strategy %s: forecast error - %s",
+                strategy_id or "unknown",
+                str(e)
+            )
+            return {
+                "No.": strategy_id,
+                "Forecast_1W": 0.0,
+                "Forecast_1M": 0.0,
+                "Forecast_3M": 0.0,
+                "Forecast_6M": 0.0,
+                "Forecast_12M": 0.0,
+                "Method": self.MODEL_INFO.name,
+                "Forecasts": [np.nan] * steps,
+                "Success": False,
+                "Error": str(e),
+            }
+
+        # 3. Utófeldolgozás
+        if postprocess:
+            forecasts = self.postprocess(raw_forecasts, allow_negative=allow_negative)
+        else:
+            forecasts = list(raw_forecasts)
+
+        # 4. Horizont aggregálás
+        horizons = self.calculate_horizons(forecasts, allow_negative=allow_negative)
+
+        return {
+            "No.": strategy_id,
+            "Forecast_1W": horizons.h1,
+            "Forecast_1M": horizons.h4,
+            "Forecast_3M": horizons.h13,
+            "Forecast_6M": horizons.h26,
+            "Forecast_12M": horizons.h52,
+            "Method": self.MODEL_INFO.name,
+            "Forecasts": forecasts,
+            "Success": True,
+            "Error": None,
+        }
+
+    # =========================================================================
+    # BATCH FORECAST
+    # =========================================================================
 
     def forecast_batch(
         self,
@@ -215,6 +520,46 @@ class BaseModel(ABC):
             for strategy_name, data in all_data.items():
                 results[strategy_name] = self.forecast(data, steps, params)
             return results
+
+    def forecast_batch_with_pipeline(
+        self,
+        all_data: Dict[str, List[float]],
+        steps: int,
+        params: Dict[str, Any],
+        postprocess: bool = True
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Batch forecast teljes pipeline-nal.
+
+        Args:
+            all_data: Dict ahol kulcs = stratégia név, érték = idősor
+            steps: Előrejelzési horizont
+            params: Paraméterek
+            postprocess: Utófeldolgozás
+
+        Returns:
+            Dict ahol kulcs = stratégia név, érték = forecast_with_pipeline eredmény
+        """
+        from models.utils.monitoring import BatchPerformanceMonitor
+
+        results = {}
+
+        with BatchPerformanceMonitor(self.MODEL_INFO.name) as monitor:
+            for strategy_id, data in all_data.items():
+                with monitor.track(strategy_id, len(data)):
+                    results[strategy_id] = self.forecast_with_pipeline(
+                        data=data,
+                        steps=steps,
+                        params=params,
+                        strategy_id=strategy_id,
+                        postprocess=postprocess
+                    )
+
+        return results
+
+    # =========================================================================
+    # DEVICE ÉS GPU KEZELÉS
+    # =========================================================================
 
     def get_device(self, data_size: int, use_gpu: bool = True):
         """
@@ -390,3 +735,10 @@ class BaseModel(ABC):
             f"{self.MODEL_INFO.name} does not support dual mode. "
             f"Set supports_dual_mode=True and implement create_dual_regressor()."
         )
+
+
+# Type hints a lazy importokhoz
+if TYPE_CHECKING:
+    from models.utils.validation import ValidationResult
+    from models.utils.aggregation import HorizonResult
+    from models.utils.monitoring import ForecastTimer

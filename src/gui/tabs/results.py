@@ -641,29 +641,11 @@ class ResultsMixin:
                     if not isinstance(forecast_values, list) or len(forecast_values) == 0:
                         forecast_values = None
 
-            # Generate Reports
+            # Generate Reports (standard MD and HTML only)
             md_path = current_exporter.create_markdown_report(
                 results_df, best_strat_id, method, [],
                 best_strat_data=best_strat_data,
                 filename_base=f"{method}_{filename_base}",
-                params=data["params"],
-                execution_time=data.get("execution_time", "N/A"),
-                ranking_mode=ranking_suffix,
-            )
-
-            current_exporter.create_monthly_markdown_report(
-                results_df, best_strat_id, method,
-                best_strat_data=best_strat_data,
-                filename_base=f"AR_{method}_{filename_base}",
-                params=data["params"],
-                execution_time=data.get("execution_time", "N/A"),
-                ranking_mode=ranking_suffix,
-            )
-
-            current_exporter.create_monthly_html_report(
-                results_df, best_strat_id, method,
-                best_strat_data=best_strat_data,
-                filename_base=f"AR_{method}_{filename_base}",
                 params=data["params"],
                 execution_time=data.get("execution_time", "N/A"),
                 ranking_mode=ranking_suffix,
@@ -846,7 +828,7 @@ class ResultsMixin:
             ranking_suffix = ranking_suffix_map.get(ranking_mode, "Standard")
 
             currency_pair = filename_base.split("_")[0]
-            folder_name = f"{method}_{currency_pair}_AllResults"
+            folder_name = f"{method}_{currency_pair}_{ranking_suffix}"
             report_dir = os.path.join(base_output_dir, folder_name)
             if not os.path.exists(report_dir):
                 os.makedirs(report_dir)
@@ -856,7 +838,7 @@ class ResultsMixin:
                 results_df=results_df,
                 method_name=method,
                 best_strat_data=best_strat_data,
-                filename_base=f"{method}_{filename_base}_all",
+                filename_base=f"AR_{method}_{filename_base}",
                 params=params,
                 execution_time=data.get("execution_time", "N/A"),
                 forecast_horizon=forecast_horizon,
@@ -913,13 +895,13 @@ class ResultsMixin:
             ranking_suffix = ranking_suffix_map.get(ranking_mode, "Standard")
 
             currency_pair = filename_base.split("_")[0]
-            folder_name = f"{method}_{currency_pair}_MonthlyResults"
+            folder_name = f"{method}_{currency_pair}_{ranking_suffix}"
             report_dir = os.path.join(base_output_dir, folder_name)
             if not os.path.exists(report_dir):
                 os.makedirs(report_dir)
 
             exporter = ReportExporter(report_dir)
-            mr_filename_base = f"{method}_{filename_base}"
+            mr_filename_base = f"MR_{method}_{filename_base}"
 
             md_path = exporter.create_monthly_markdown_report(
                 results_df=results_df,
