@@ -194,7 +194,7 @@ class DataLoadingMixin:
         self.sound.play_button_click()
         mode = self.feature_var.get()
         self._update_feature_info()
-        self._log(f"Feature mode: {mode}")
+        self._log(f"Feature mode: {mode}", "debug")
         self._save_settings_now()
 
         if self.raw_data is not None and not self.raw_data.empty:

@@ -1,3 +1,11 @@
+v5.4.6 Stable
+- Results tab automatikus aktiválás analysis után (gombok aktívak)
+- Automatikus .pkl mentés Data_raw mappába (régi formátum: timestamp_method_currency.pkl)
+- Kétszintű logging rendszer: GUI (fontos) vs File (részletes debug)
+- Progress bar működik analysis közben (0-100%)
+- Log színek: info=zöld, warning=narancs, error=piros
+- Debug üzenetek csak log fájlba kerülnek (nem GUI-ba)
+
 v5.4.5 Stable
 - Panel Mode 100% modell-fuggetlen architektura
 - Uj: src/analysis/panel_executor.py (panel mode infrastruktura)

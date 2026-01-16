@@ -560,10 +560,16 @@ class AnalysisMixin:
     def _update_analysis_progress(self, progress):
         """Progress frissites a fo szalon."""
         if progress.total_strategies > 0:
-            pct = (progress.completed_strategies / progress.total_strategies) * 100
+            pct = progress.completed_strategies / progress.total_strategies
+
+            # Progress bar frissitese (0.0 - 1.0)
+            self.set_progress(pct)
+
+            # Debug level - csak file-ba kerul, GUI-ban nem jelenik meg
             self._log(
                 f"Progress: {progress.completed_strategies}/{progress.total_strategies} "
-                f"({pct:.1f}%) - {progress.current_strategy}"
+                f"({pct*100:.1f}%) - {progress.current_strategy}",
+                "debug"
             )
 
     def _on_analysis_complete(self, results):
@@ -580,8 +586,186 @@ class AnalysisMixin:
             self._analysis_results = results
             self._log("Results available in Results tab")
 
+            # Eredmenyek konvertalasa Results tab formatumba
+            self._convert_results_to_results_tab(results)
+
         self._reset_analysis_ui()
         self.sound.play_model_complete()
+
+    def _convert_results_to_results_tab(self, results):
+        """
+        Konvertalja az AnalysisResult dict-et a Results tab altal vart formatumba.
+        Aktivalja a Results tab gombjait.
+        """
+        import pandas as pd
+        import time
+        import os
+
+        # Sikeres eredmenyek kiszurese
+        successful_results = {k: v for k, v in results.items() if v.success}
+
+        if not successful_results:
+            self._log("No successful results to display.", "warning")
+            return
+
+        # DataFrame keszitese az eredmenyekbol
+        rows = []
+        for strat_id, result in successful_results.items():
+            forecasts = result.forecasts if result.forecasts else []
+
+            # Forecast osszegzesek szamitasa (kumulativ)
+            forecast_1w = sum(forecasts[:1]) if len(forecasts) >= 1 else 0
+            forecast_1m = sum(forecasts[:4]) if len(forecasts) >= 4 else sum(forecasts)
+            forecast_3m = sum(forecasts[:13]) if len(forecasts) >= 13 else sum(forecasts)
+            forecast_6m = sum(forecasts[:26]) if len(forecasts) >= 26 else sum(forecasts)
+            forecast_12m = sum(forecasts[:52]) if len(forecasts) >= 52 else sum(forecasts)
+
+            rows.append({
+                "No.": int(strat_id) if str(strat_id).isdigit() else strat_id,
+                "Forecast_1W": round(forecast_1w, 2),
+                "Forecast_1M": round(forecast_1m, 2),
+                "Forecast_3M": round(forecast_3m, 2),
+                "Forecast_6M": round(forecast_6m, 2),
+                "Forecast_12M": round(forecast_12m, 2),
+                "Method": self.model_var.get(),
+                "Forecasts": forecasts,
+                "Elapsed_ms": result.elapsed_ms
+            })
+
+        results_df = pd.DataFrame(rows)
+
+        # Rendezes Forecast_1M szerint (csokkeno)
+        results_df = results_df.sort_values("Forecast_1M", ascending=False).reset_index(drop=True)
+
+        # Legjobb strategia azonositasa
+        best_strat_id = results_df.iloc[0]["No."] if not results_df.empty else None
+        best_forecasts = results_df.iloc[0]["Forecasts"] if not results_df.empty else None
+
+        # Best strategy data keszitese (torteneti adat)
+        best_strat_data = None
+        all_strategies_data = {}
+
+        if self.processed_data is not None and best_strat_id is not None:
+            try:
+                # Legjobb strategia torteneti adatainak kinyerese
+                strat_data = self.processed_data[
+                    self.processed_data["No."] == best_strat_id
+                ].copy()
+                if not strat_data.empty:
+                    best_strat_data = strat_data
+
+                # OSSZES strategia torteneti adatainak mentese (nem csak top 20!)
+                # Ez szukseges a teljes .pkl fajlhoz
+                for strategy_id in results_df["No."].values:
+                    s_data = self.processed_data[
+                        self.processed_data["No."] == strategy_id
+                    ].copy()
+                    if not s_data.empty:
+                        all_strategies_data[strategy_id] = s_data
+            except (KeyError, ValueError) as e:
+                self._log(f"Warning: Could not extract strategy data: {e}")
+
+        # Filename base keszitese
+        filename_base = "Unknown"
+        if self.processed_data is not None and "SourceFile" in self.processed_data.columns:
+            source_files = self.processed_data["SourceFile"].unique()
+            if len(source_files) > 0:
+                # Elso fajlnev alapjan (kiterjesztes nelkul)
+                first_file = os.path.basename(str(source_files[0]))
+                filename_base = os.path.splitext(first_file)[0]
+
+        # Execution time szamitasa
+        elapsed = time.time() - getattr(self, '_analysis_start_time', time.time())
+        hours = int(elapsed // 3600)
+        minutes = int((elapsed % 3600) // 60)
+        seconds = int(elapsed % 60)
+        execution_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+        # last_results dict letrehozasa
+        self.last_results = {
+            "method": self.model_var.get(),
+            "filename_base": filename_base,
+            "best_strat_id": best_strat_id,
+            "best_strat_data": best_strat_data,
+            "results": results_df,
+            "forecast_values": best_forecasts,
+            "all_strategies_data": all_strategies_data,
+            "params": self._collect_params(),
+            "ranking_mode": "forecast",
+            "execution_time": execution_time,
+            "version": "1.0"
+        }
+
+        # Results tab allapot frissitese
+        self.results_df = results_df
+        self.current_ranking_mode = "forecast"
+        self.results_with_stability = None
+
+        # Results tab megjelenites frissitese
+        if hasattr(self, '_update_results_display'):
+            self._update_results_display(results_df, "Forecast_1M")
+
+        # Results tab gombok aktivalasa
+        if hasattr(self, 'btn_generate_report'):
+            self.btn_generate_report.configure(state="normal")
+        if hasattr(self, 'btn_export_csv'):
+            self.btn_export_csv.configure(state="normal")
+        if hasattr(self, '_enable_ranking_controls'):
+            self._enable_ranking_controls()
+
+        # Info label frissitese
+        if hasattr(self, 'results_info_label'):
+            self.results_info_label.configure(
+                text=f"Analysis complete: {len(results_df)} strategies | Model: {self.model_var.get()}",
+                text_color="#2ecc71"
+            )
+
+        self._log(f"Results ready: {len(results_df)} strategies. Buttons activated in Results tab.")
+
+        # Automatikus pickle mentes a Data_raw konyvtarba
+        self._save_analysis_state_pickle(filename_base)
+
+    def _save_analysis_state_pickle(self, filename_base: str):
+        """
+        Automatikusan menti az analysis state-et pickle fajlba a Data_raw konyvtarba.
+        A fajlnev formatum: {timestamp}_{method}_{currency_pair}.pkl
+        Pelda: 20260113_145629_GradientBoosting_EURJPY.pkl
+        """
+        import pickle
+        import os
+        from datetime import datetime
+
+        if not hasattr(self, 'last_results') or not self.last_results:
+            return
+
+        try:
+            # Data_raw konyvtar a working directory-ban (fokonyvtar)
+            # Ugyanugy mint a regi kodban: os.getcwd() + "Data_raw"
+            data_raw_dir = os.path.join(os.getcwd(), "Data_raw")
+
+            # Ha nincs, letrehozzuk
+            if not os.path.exists(data_raw_dir):
+                os.makedirs(data_raw_dir)
+                self._log(f"Created Data_raw directory: {data_raw_dir}")
+
+            # Fajlnev generalasa - regi formatum: {timestamp}_{method}_{currency_pair}.pkl
+            method = self.last_results.get("method", "Unknown")
+            # Currency pair kinyerese a filename_base-bol (pl. "EURJPY_D1" -> "EURJPY")
+            currency_pair = filename_base.split("_")[0] if "_" in filename_base else filename_base
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            pkl_filename = f"{timestamp}_{method}_{currency_pair}.pkl"
+            pkl_path = os.path.join(data_raw_dir, pkl_filename)
+
+            # Mentes
+            with open(pkl_path, 'wb') as f:
+                pickle.dump(self.last_results, f)
+
+            # Fajlmeret kijelzese
+            file_size_mb = os.path.getsize(pkl_path) / (1024 * 1024)
+            self._log(f"Analysis state saved: Data_raw/{pkl_filename} ({file_size_mb:.2f} MB)")
+
+        except (OSError, IOError, pickle.PicklingError) as e:
+            self._log(f"Warning: Could not save analysis state: {e}", "warning")
 
     def _reset_analysis_ui(self):
         """UI visszaallitasa elemzes utan."""
@@ -589,6 +773,8 @@ class AnalysisMixin:
         self.btn_stop.configure(state="disabled")
         self.btn_pause.configure(state="disabled")
         self.btn_pause.configure(text="Pause", fg_color="#f39c12")
+        # Progress bar nullazasa
+        self.set_progress(0)
 
     def _start_time_timer(self):
         """Idozito inditasa."""

@@ -318,7 +318,7 @@ class ResultsMixin:
             self._run_ranking_async(base_df, mode)
         else:
             # No calculation needed, apply ranking directly
-            self._log("Metrics already present, skipping calculation.")
+            self._log("Metrics already present, skipping calculation.", "debug")
             self._finalize_ranking(base_df, mode)
 
     def _run_ranking_async(self, base_df, mode):
@@ -335,7 +335,7 @@ class ResultsMixin:
                 if hasattr(self, "get_data"):
                     ts_data = self.get_data()
                     if ts_data is not None:
-                        self.after(0, lambda: self._log("Using currently loaded data from Data Tab."))
+                        self.after(0, lambda: self._log("Using currently loaded data from Data Tab.", "debug"))
 
                 # 2. If not found, try to reconstruct from all_strategies_data
                 if ts_data is None:
@@ -348,13 +348,15 @@ class ResultsMixin:
                     if all_strat_data:
                         self.after(0, lambda: self._log(
                             "Data not loaded in Data Tab. "
-                            "Attempting to reconstruct from saved strategy data..."
+                            "Attempting to reconstruct from saved strategy data...",
+                            "debug"
                         ))
                         ts_data = self._reconstruct_ts_data_from_dict(all_strat_data)
                         if ts_data is not None:
                             cnt = len(ts_data["No."].unique())
                             self.after(0, lambda: self._log(
-                                f"Reconstructed data for {cnt} strategies."
+                                f"Reconstructed data for {cnt} strategies.",
+                                "debug"
                             ))
 
                 if ts_data is not None:
@@ -678,14 +680,14 @@ class ResultsMixin:
             )
 
             self.after(0, lambda: self._log(f"Reports saved in: {report_dir}"))
-            self.after(0, lambda: self._log(f"MD: {os.path.basename(md_path)}"))
+            self.after(0, lambda: self._log(f"MD: {os.path.basename(md_path)}", "debug"))
             if html_path:
-                self.after(0, lambda: self._log(f"HTML: {os.path.basename(html_path)}"))
+                self.after(0, lambda: self._log(f"HTML: {os.path.basename(html_path)}", "debug"))
 
             # Auto Mode: Generate All Results report
             if auto_mode:
                 try:
-                    self.after(0, lambda: self._log("Generating All Results report (auto)..."))
+                    self.after(0, lambda: self._log("Generating All Results report (auto)...", "debug"))
                     forecast_horizon = data.get("params", {}).get("forecast_horizon", 52)
                     ar_filename_base = f"AR_{method}_{filename_base}"
                     ar_md_path, ar_html_path = current_exporter.create_all_results_report(
@@ -698,10 +700,10 @@ class ResultsMixin:
                         forecast_horizon=forecast_horizon,
                         ranking_mode=ranking_suffix,
                     )
-                    self.after(0, lambda: self._log(f"AR MD: {os.path.basename(ar_md_path)}"))
-                    self.after(0, lambda: self._log(f"AR HTML: {os.path.basename(ar_html_path)}"))
+                    self.after(0, lambda: self._log(f"AR MD: {os.path.basename(ar_md_path)}", "debug"))
+                    self.after(0, lambda: self._log(f"AR HTML: {os.path.basename(ar_html_path)}", "debug"))
                 except (OSError, ValueError, RuntimeError) as ar_e:
-                    self.after(0, lambda: self._log(f"Error generating AR report: {ar_e}"))
+                    self.after(0, lambda: self._log(f"Error generating AR report: {ar_e}", "warning"))
 
             return report_dir
 
@@ -862,11 +864,11 @@ class ResultsMixin:
             )
 
             self.after(0, lambda: self._log(f"All Results reports saved in: {report_dir}"))
-            self.after(0, lambda: self._log(f"MD: {os.path.basename(md_path)}"))
-            self.after(0, lambda: self._log(f"HTML: {os.path.basename(html_path)}"))
+            self.after(0, lambda: self._log(f"MD: {os.path.basename(md_path)}", "debug"))
+            self.after(0, lambda: self._log(f"HTML: {os.path.basename(html_path)}", "debug"))
 
         except (OSError, ValueError, RuntimeError) as e:
-            self.after(0, lambda: self._log(f"Error generating All Results report: {e}"))
+            self.after(0, lambda: self._log(f"Error generating All Results report: {e}", "error"))
             traceback.print_exc()
 
     def _on_show_monthly_results(self):
@@ -942,11 +944,11 @@ class ResultsMixin:
             )
 
             self.after(0, lambda: self._log(f"Monthly Results reports saved in: {report_dir}"))
-            self.after(0, lambda: self._log(f"MD: {os.path.basename(md_path)}"))
-            self.after(0, lambda: self._log(f"HTML: {os.path.basename(html_path)}"))
+            self.after(0, lambda: self._log(f"MD: {os.path.basename(md_path)}", "debug"))
+            self.after(0, lambda: self._log(f"HTML: {os.path.basename(html_path)}", "debug"))
 
         except (OSError, ValueError, RuntimeError) as e:
-            self.after(0, lambda: self._log(f"Error generating Monthly Results report: {e}"))
+            self.after(0, lambda: self._log(f"Error generating Monthly Results report: {e}", "error"))
             traceback.print_exc()
 
     def _on_load_analysis_state(self):
@@ -974,7 +976,7 @@ class ResultsMixin:
             return
 
         try:
-            self._log(f"Loading analysis state from: {file_path}...")
+            self._log(f"Loading analysis state from: {os.path.basename(file_path)}...")
 
             with open(file_path, "rb") as f:
                 loaded_data = pickle.load(f)
@@ -985,7 +987,7 @@ class ResultsMixin:
 
             # Version handling
             data_version = loaded_data.get("version", "0.9")
-            self._log(f"Loading data format version: {data_version}")
+            self._log(f"Loading data format version: {data_version}", "debug")
 
             if data_version == "0.9":
                 loaded_data.setdefault("ranking_mode", "forecast")
@@ -1002,7 +1004,7 @@ class ResultsMixin:
                 if len(full_params) > len(saved_params):
                     loaded_data["params"] = full_params
                     backfilled = len(full_params) - len(saved_params)
-                    self._log(f"Backfilled {backfilled} missing parameters with defaults")
+                    self._log(f"Backfilled {backfilled} missing parameters with defaults", "debug")
 
             # Restore state
             self.last_results = loaded_data
@@ -1020,9 +1022,9 @@ class ResultsMixin:
             num_strategies = len(self.results_df) if self.results_df is not None else 0
             num_with_history = len(self.all_strategies_data)
             self._log(
-                f"State loaded successfully. Method: {loaded_data.get('method', 'Unknown')}"
+                f"State loaded: {loaded_data.get('method', 'Unknown')} - {num_strategies} strategies"
             )
-            self._log(f"Loaded {num_strategies} strategies, {num_with_history} with full history")
+            self._log(f"Strategies with full history: {num_with_history}", "debug")
 
             # Update Display
             sort_col = "Forecast_1M"
@@ -1046,10 +1048,8 @@ class ResultsMixin:
                 text=f"[Current: {mode_names.get(ranking_mode, ranking_mode)}]"
             )
 
-            self._log("Analysis state loaded successfully!")
-
         except (pickle.UnpicklingError, ValueError, OSError, EOFError) as e:
-            self._log(f"Error loading state: {e}")
+            self._log(f"Error loading state: {e}", "error")
             logging.error("Error loading state: %s", e)
 
     def _enable_ranking_controls(self):

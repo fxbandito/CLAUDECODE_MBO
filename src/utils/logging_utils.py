@@ -35,17 +35,38 @@ class LogCategory(Enum):
 
 
 class LogLevel:
-    """Log level constants with colors for GUI."""
+    """
+    Log level constants with colors for GUI.
 
-    NORMAL = "normal"
-    WARNING = "warning"
-    CRITICAL = "critical"
+    Levels for GUI display:
+    - INFO: Important messages shown in GUI (green) - data loaded, analysis complete, etc.
+    - DEBUG: Detailed messages for file log only (not shown in GUI)
+    - WARNING: Warnings shown in GUI (orange)
+    - ERROR/CRITICAL: Errors shown in GUI (red)
+    """
 
+    # GUI display levels
+    INFO = "info"          # Important - shown in GUI (green)
+    DEBUG = "debug"        # Detailed - file only (not shown in GUI)
+    WARNING = "warning"    # Warnings - shown in GUI (orange)
+    ERROR = "error"        # Errors - shown in GUI (red)
+    CRITICAL = "critical"  # Critical - shown in GUI (red)
+
+    # Legacy aliases for backward compatibility
+    NORMAL = "info"
+
+    # Colors for GUI display
     COLORS = {
-        "normal": None,
+        "info": "#2ecc71",     # Green - important info
+        "debug": None,         # Not shown in GUI
         "warning": "#f39c12",  # Orange
-        "critical": "#e74c3c",  # Red
+        "error": "#e74c3c",    # Red
+        "critical": "#e74c3c", # Red
+        "normal": "#2ecc71",   # Legacy alias
     }
+
+    # Which levels should appear in GUI
+    GUI_VISIBLE = {"info", "warning", "error", "critical", "normal"}
 
 
 def create_log_message(event: str, details: Optional[str] = None, **kwargs) -> str:

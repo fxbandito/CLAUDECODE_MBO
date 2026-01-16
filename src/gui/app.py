@@ -5,6 +5,7 @@ MBO Trading Strategy Analyzer - Fő Alkalmazás Osztály
 # pylint: disable=too-many-instance-attributes,attribute-defined-outside-init
 # pylint: disable=too-many-statements,broad-exception-caught,unnecessary-lambda
 
+import logging
 import os
 import threading
 from datetime import datetime
@@ -18,6 +19,7 @@ from gui.settings import SettingsManager
 from gui.sorrend_data import get_settings
 from gui.sound_manager import get_sound_manager
 from gui.translate import get_translator, tr
+from utils.logging_utils import LogLevel
 
 from gui.tabs.data_loading import DataLoadingMixin
 from gui.tabs.analysis import AnalysisMixin
@@ -26,6 +28,9 @@ from gui.tabs.comparison import ComparisonMixin
 from gui.tabs.inspection import InspectionTabMixin
 
 from analysis.engine import get_resource_manager
+
+# Application logger for file logging
+logger = logging.getLogger("GUI")
 
 
 def get_version() -> str:
@@ -600,19 +605,64 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ComparisonMixin, Ins
 
     # === LOG ===
 
-    def _log(self, message: str, level: str = "normal"):
-        """Log üzenet timestamp-tel."""
+    def _log(self, message: str, level: str = "info"):
+        """
+        Kétszintű log rendszer:
+        - GUI: Csak fontos üzenetek (info, warning, error, critical)
+        - File: Minden üzenet (debug is) - hibakereséshez
+
+        Levels:
+        - "info" / "normal": Fontos info - GUI + File (zöld)
+        - "debug": Részletes - CSAK File (nem jelenik meg GUI-ban)
+        - "warning": Figyelmeztetés - GUI + File (narancs)
+        - "error" / "critical": Hiba - GUI + File (piros)
+        """
         timestamp = datetime.now().strftime("%H:%M:%S")
 
-        if level == "critical":
+        # Normalize level names
+        if level == "normal":
+            level = "info"
+
+        # Always log to file (Python logging)
+        log_level_map = {
+            "debug": logging.DEBUG,
+            "info": logging.INFO,
+            "warning": logging.WARNING,
+            "error": logging.ERROR,
+            "critical": logging.CRITICAL,
+        }
+        py_level = log_level_map.get(level, logging.INFO)
+        logger.log(py_level, message)
+
+        # Only show in GUI if level is visible (not debug)
+        if level not in LogLevel.GUI_VISIBLE:
+            return  # Debug messages: file only
+
+        # Format for GUI display
+        if level in ("error", "critical"):
             prefix = "[ERROR] "
+            color = LogLevel.COLORS.get("error")
         elif level == "warning":
             prefix = "[WARN] "
+            color = LogLevel.COLORS.get("warning")
         else:
             prefix = ""
+            color = LogLevel.COLORS.get("info")
 
         formatted = f"[{timestamp}] {prefix}{message}\n"
-        self.log_textbox.insert("end", formatted)
+
+        # Insert with color tag if available
+        if color and hasattr(self, 'log_textbox'):
+            # Create tag for this color if not exists
+            tag_name = f"color_{level}"
+            try:
+                self.log_textbox.tag_config(tag_name, foreground=color)
+                self.log_textbox.insert("end", formatted, tag_name)
+            except Exception:
+                self.log_textbox.insert("end", formatted)
+        else:
+            self.log_textbox.insert("end", formatted)
+
         self.log_textbox.see("end")
 
     def set_progress(self, value: float):
