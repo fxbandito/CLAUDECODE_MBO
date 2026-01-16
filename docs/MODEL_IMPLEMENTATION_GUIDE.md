@@ -421,6 +421,101 @@ class {ModelName}Model(BaseModel):
 > Barmely sklearn-kompatibilis regresszorral mukodik (fit/predict metodusok).
 > Aktivalas: `recursive_horizon` parameter a params-ban.
 
+### 3.6 Panel Mode Implementacio
+
+> **FONTOS:** A Panel Mode **100% modell-fuggetlen** architekturara epul!
+> Az infrastruktura fajlok NEM TARTALMAZNAK semmilyen modell-specifikus kodot.
+>
+> **Panel Mode koncepcio:**
+> - **Egy modell** tanit az **osszes strategiara** egyszerre (panel adatstruktura)
+> - Sokkal **gyorsabb** ML-alapu modelleknel, mint az egyenkenti strategia-feldolgozas
+> - **Lag feature-ok** az idosoros jelleg megorzesehez
+> - **Time-aware split** a data leakage elkerulesere
+>
+> **Architektura:**
+> - `src/analysis/panel_executor.py` - 100% modell-fuggetlen panel mode infrastruktura
+> - `src/analysis/dual_task.py` - Worker task (KOZOS a Dual Mode-dal!)
+> - `src/models/base.py` - `create_dual_regressor()` UJRAHASZNALVA (ugyanaz a metodus!)
+>
+> **KOTELEZO lepesek uj Panel Mode modellhez:**
+>
+> 1. Allitsd be `supports_panel_mode=True` a MODEL_INFO-ban
+> 2. **KOTELEZO** implementalni a `create_dual_regressor()` metodust
+>    - UGYANAZ a metodus mint a Dual Mode-nal!
+>    - Ha mar implementaltad Dual Mode-hoz, Panel Mode automatikusan mukodik
+>    - NINCS FALLBACK - ha nem implementalod, hiba lesz!
+>
+> **Pelda implementacio:**
+> ```python
+> class XGBoostModel(BaseModel):
+>     MODEL_INFO = ModelInfo(
+>         name="XGBoost",
+>         category="Classical Machine Learning",
+>         supports_panel_mode=True,  # <-- Panel Mode BEKAPCSOLVA
+>         supports_dual_mode=True,   # <-- Dual Mode is tamogatott
+>         ...
+>     )
+>
+>     def create_dual_regressor(self, params: Dict[str, Any], n_jobs: int = 1) -> Any:
+>         """
+>         Regresszor letrehozasa - KOZOS a Panel es Dual mode-hoz!
+>
+>         FONTOS: A MODELL donti el, hogyan ertelmezi a parametereket!
+>         """
+>         import xgboost as xgb
+>
+>         n_estimators = int(params.get("n_estimators", self.PARAM_DEFAULTS.get("n_estimators", "100")))
+>         max_depth_str = params.get("max_depth", self.PARAM_DEFAULTS.get("max_depth", "6"))
+>         max_depth = int(max_depth_str) if max_depth_str not in ("None", "0") else None
+>         learning_rate = float(params.get("learning_rate", self.PARAM_DEFAULTS.get("learning_rate", "0.1")))
+>
+>         return xgb.XGBRegressor(
+>             n_estimators=n_estimators,
+>             max_depth=max_depth,
+>             learning_rate=learning_rate,
+>             tree_method="hist",  # CPU-optimalizalt
+>             n_jobs=n_jobs,
+>             verbosity=0,
+>         )
+> ```
+>
+> **Hasznalat:**
+> ```python
+> from models import supports_panel_mode
+> from analysis import run_panel_mode
+>
+> if supports_panel_mode("XGBoost"):
+>     results_df, best_id, best_data, filename, all_data = run_panel_mode(
+>         data=my_dataframe,
+>         method_name="XGBoost",
+>         params={"n_estimators": "200"},  # A MODELL ertelmezi!
+>     )
+> ```
+>
+> **Panel Mode vs Dual Mode kulonbsegek:**
+>
+> | Jellemzo | Panel Mode | Dual Mode |
+> |----------|------------|-----------|
+> | Modell szam | 1 modell / horizon | 2 modell / horizon (activity + profit) |
+> | Cel | Gyors batch predikció | Finomhangolt forecasting |
+> | Adat struktura | Panel (osszes strategia egyutt) | Strategiankent kulon |
+> | Tipikus hasznalat | Sok strategia gyors elemzese | Reszletes elorejelzes |
+> | Implementacio | `create_dual_regressor()` | `create_dual_regressor()` |
+>
+> **FONTOS:** Ha egy modell mindket mod-ot tamogatja, EGYETLEN `create_dual_regressor()`
+> implementacio eleg - az infrastruktura automatikusan kezeli!
+>
+> **Elerheto utility fuggvenyek (panel_executor.py):**
+> ```python
+> from analysis.panel_executor import (
+>     run_panel_mode,              # Fo belepes pont
+>     prepare_panel_data,          # Panel adat elokeszites lag feature-okkel
+>     time_aware_split,            # Data leakage-mentes split
+>     get_panel_mode_models,       # Tamogatott modellek listaja
+>     PANEL_MODE_SUPPORTED_MODELS, # Legacy alias
+> )
+> ```
+
 ---
 
 ## 4. Parameter Kezeles
@@ -461,7 +556,8 @@ method = params.get("method", "default")  # String marad
 >
 > **Új architektúra fájlok:**
 > - `src/analysis/engine.py` - `ResourceManager` singleton (GUI globális beállítások)
-> - `src/analysis/process_utils.py` - Process management utility függvények
+> - `src/analysis/process_utils.py` - **KÖZPONTI** process management utility függvények
+> - `src/analysis/dual_task.py` - Dual mode algoritmusok (re-exportálja process_utils-t)
 > - `src/data/processor.py` - `DataProcessor.detect_data_mode()` adat mód detektálás
 >
 > **Elérhető utility függvények (`src/analysis/process_utils.py`):**
@@ -469,9 +565,67 @@ method = params.get("method", "default")  # String marad
 > from analysis.process_utils import (
 >     cleanup_cuda_context,        # CUDA memória cleanup
 >     force_kill_child_processes,  # Worker processek leállítása
->     init_worker_environment,     # Worker thread/env beállítás
+>     init_worker_environment,     # Worker thread/env beállítás (KÖZPONTI!)
 >     set_process_priority,        # Process prioritás (Windows/Unix)
 > )
+> ```
+>
+> ### Worker Inicializálás - KÖZPONTI FÜGGVÉNY
+>
+> Az `init_worker_environment()` a **KÖZPONTI** függvény minden multiprocessing worker-hez.
+> **FONTOS:** Nincs duplikáció - minden modul innen importálja!
+>
+> ```python
+> def init_worker_environment(n_threads: int = 1) -> None:
+>     """
+>     Worker process környezet inicializálása.
+>
+>     Miért fontos:
+>     - Megakadályozza a "halálspirált" (túl sok thread)
+>     - Elkerüli a CUDA context konfliktusokat
+>     - Megelőzi a FAISS AVX2/CUDA ütközéseket
+>     """
+>     # 1. GPU LETILTÁS - Worker-ek NEM használhatnak GPU-t
+>     os.environ["CUDA_VISIBLE_DEVICES"] = ""
+>     os.environ["FAISS_OPT_LEVEL"] = "generic"
+>
+>     # 2. THREAD LIMITEK - Megelőzi a túlterhelést
+>     # 12 worker × 12 thread = 144 thread → rendszer lefagyás
+>     # 12 worker × 1 thread = 12 thread → stabil futás
+>     os.environ["OMP_NUM_THREADS"] = str(n_threads)
+>     os.environ["MKL_NUM_THREADS"] = str(n_threads)
+>     os.environ["OPENBLAS_NUM_THREADS"] = str(n_threads)
+>     os.environ["VECLIB_MAXIMUM_THREADS"] = str(n_threads)
+>     os.environ["NUMEXPR_NUM_THREADS"] = str(n_threads)
+>
+>     # 3. WORKER JELÖLÉS
+>     os.environ["MBO_MP_WORKER"] = "1"
+>
+>     # 4. PYTORCH KONFIGURÁCIÓ
+>     torch.set_num_threads(n_threads)
+>     torch.set_num_interop_threads(n_threads)
+>
+>     # 5. WARNING ELNYOMÁS
+>     warnings.filterwarnings("ignore", message="Loky-backed parallel loops...")
+> ```
+>
+> **Használat multiprocessing.Pool-ban:**
+> ```python
+> from analysis.process_utils import init_worker_environment
+>
+> pool = multiprocessing.Pool(
+>     processes=optimal_workers,
+>     initializer=init_worker_environment  # KÖZPONTI függvény!
+> )
+> ```
+>
+> **Import struktúra (nincs duplikáció):**
+> ```
+> process_utils.py          ◀── EGYETLEN KÖZPONTI HELY
+>        │
+>        ├── dual_task.py        ──re-export──▶  (backward compat)
+>        ├── dual_executor.py    ──imports──────▶
+>        └── __init__.py         ──exports──────▶
 > ```
 >
 > **Adat mód detektálás (`src/data/processor.py`):**

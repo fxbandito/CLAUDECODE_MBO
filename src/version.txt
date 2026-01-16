@@ -1,3 +1,12 @@
+v5.4.5 Stable
+- Panel Mode 100% modell-fuggetlen architektura
+- Uj: src/analysis/panel_executor.py (panel mode infrastruktura)
+- Uj fuggvenyek: prepare_panel_data(), time_aware_split(), get_panel_mode_models()
+- Panel es Dual mode KOZOS create_dual_regressor() metodust hasznal
+- Dokumentacio frissitve: MODEL_IMPLEMENTATION_GUIDE.md (3.6 Panel Mode szekció)
+- Dokumentacio frissitve: 04_Analysis_Tab.md (dinamikus registry-alapu modell lista)
+- Nincs hardcoded modell lista - minden dinamikusan a registry-bol
+
 v5.4.4 Stable
 - Engine refaktorálás: src_old/engine.py elemzés és modularizáció
 - Új: src/analysis/process_utils.py (CUDA cleanup, worker management)

@@ -148,25 +148,58 @@ def init_worker_environment(n_threads: int = 1) -> None:
     """
     Worker process környezet inicializálása.
 
-    Multiprocessing Pool worker-ek inicializálásához.
-    Korlátozza a thread számot a BLAS/OpenMP könyvtárakban.
+    KÖZPONTI függvény minden multiprocessing worker-hez.
+    Korlátozza a thread számot, letiltja a GPU-t és konfigurálja
+    a numerikus könyvtárakat a biztonságos párhuzamos futtatáshoz.
 
     Args:
         n_threads: Megengedett thread szám (default: 1)
+
+    Használat:
+        - multiprocessing.Pool initializer-ként
+        - Bármely worker process indulásakor
+
+    Miért fontos:
+        - Megakadályozza a "halálspirált" (túl sok thread)
+        - Elkerüli a CUDA context konfliktusokat
+        - Megelőzi a FAISS AVX2/CUDA ütközéseket
     """
+    import warnings  # pylint: disable=import-outside-toplevel
+
     threads_str = str(n_threads)
 
-    # BLAS/OpenMP thread control
+    # =========================================================================
+    # 1. GPU LETILTÁS - KRITIKUS a multiprocessing stabilitáshoz
+    # =========================================================================
+    # Worker-ek NEM használhatnak GPU-t - elkerüli:
+    # - CUDA context konfliktusokat
+    # - Access violation hibákat
+    # - Memória fragmentációt több CUDA context-ből
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+    # FAISS: generic CPU implementáció - elkerüli AVX2/CUDA konfliktusokat
+    os.environ["FAISS_OPT_LEVEL"] = "generic"
+
+    # =========================================================================
+    # 2. THREAD LIMITEK - Megelőzi a túlterhelést
+    # =========================================================================
+    # Single-thread mód numerikus könyvtárakhoz
+    # 12 worker × 12 thread = 144 thread → rendszer lefagyás
+    # 12 worker × 1 thread = 12 thread → stabil futás
     os.environ["OMP_NUM_THREADS"] = threads_str
     os.environ["MKL_NUM_THREADS"] = threads_str
     os.environ["OPENBLAS_NUM_THREADS"] = threads_str
     os.environ["VECLIB_MAXIMUM_THREADS"] = threads_str
     os.environ["NUMEXPR_NUM_THREADS"] = threads_str
 
-    # Jelölés multiprocessing worker-ként
+    # =========================================================================
+    # 3. WORKER JELÖLÉS - Más modulok ellenőrizhetik
+    # =========================================================================
     os.environ["MBO_MP_WORKER"] = "1"
 
-    # PyTorch thread control
+    # =========================================================================
+    # 4. PYTORCH KONFIGURÁCIÓ
+    # =========================================================================
     try:
         import torch  # pylint: disable=import-outside-toplevel
         torch.set_num_threads(n_threads)
@@ -176,7 +209,16 @@ def init_worker_environment(n_threads: int = 1) -> None:
     except Exception as e:  # pylint: disable=broad-exception-caught
         logger.debug("torch thread config error: %s", e)
 
-    logger.debug("Worker initialized with %d threads", n_threads)
+    # =========================================================================
+    # 5. WARNING ELNYOMÁS - Tisztább logok
+    # =========================================================================
+    # Sklearn loky warning elnyomása (nested parallelism)
+    warnings.filterwarnings(
+        "ignore",
+        message="Loky-backed parallel loops cannot be called"
+    )
+
+    logger.debug("Worker initialized: %d threads, GPU disabled, FAISS generic", n_threads)
 
 
 def set_process_priority(priority: str = "below_normal") -> bool:

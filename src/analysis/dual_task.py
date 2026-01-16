@@ -2,7 +2,6 @@
 Dual Mode Task - 100% Modell-független worker infrastruktúra.
 
 Ez a modul KIZÁRÓLAG az általános dual mode infrastruktúrát biztosítja:
-- Worker process környezet inicializálás
 - Rekurzív előrejelzés algoritmus
 - Task wrapper a multiprocessing-hez
 
@@ -10,58 +9,16 @@ A KONKRÉT MODELL IMPLEMENTÁCIÓK a models/ mappában találhatók.
 Minden modell a saját create_dual_regressor() metódusát implementálja.
 
 FONTOS: Ez a fájl NEM TARTALMAZ semmilyen modell-specifikus kódot!
+Worker inicializálás: analysis.process_utils.init_worker_environment()
 """
 
-import os
-import warnings
 from typing import Any, Dict
 
 import numpy as np
 import pandas as pd
 
-
-# =============================================================================
-# WORKER PROCESS INICIALIZÁLÁS
-# =============================================================================
-
-
-def init_worker_environment() -> None:
-    """
-    Worker process környezet inicializálása.
-
-    Általános beállítások minden modellhez:
-    - GPU letiltása (CUDA konfliktusok elkerülése multiprocessing-ben)
-    - Szál limitek beállítása
-    - Numerikus könyvtárak konfigurálása
-    """
-    # GPU letiltása worker-ekben - megelőzi a CUDA context konfliktusokat
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    os.environ["FAISS_OPT_LEVEL"] = "generic"
-
-    # Single-thread mód numerikus könyvtárakhoz
-    # A modellek saját maguk döntik el, hány szálat használnak
-    os.environ["OMP_NUM_THREADS"] = "1"
-    os.environ["MKL_NUM_THREADS"] = "1"
-    os.environ["OPENBLAS_NUM_THREADS"] = "1"
-    os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
-    os.environ["NUMEXPR_NUM_THREADS"] = "1"
-
-    # Worker flag - modellek ellenőrizhetik
-    os.environ["MBO_MP_WORKER"] = "1"
-
-    # PyTorch konfiguráció (ha elérhető)
-    try:
-        import torch
-        torch.set_num_threads(1)
-        torch.set_num_interop_threads(1)
-    except ImportError:
-        pass
-
-    # Sklearn warning elnyomása
-    warnings.filterwarnings(
-        "ignore",
-        message="Loky-backed parallel loops cannot be called"
-    )
+# Worker inicializálás - KÖZPONTI HELY: process_utils
+from analysis.process_utils import init_worker_environment  # noqa: F401 - reexport
 
 
 # =============================================================================

@@ -725,15 +725,22 @@ if use_gpu and torch.cuda.is_available():
 
 A **Panel Mode** egyetlen modellt tanít az **összes stratégiára egyszerre**, ahelyett, hogy stratégiánként külön-külön tanítana.
 
-## Támogatott modellek (5 db)
+## Támogatott modellek
 
-| Modell | Támogatás |
-|--------|-----------|
-| Random Forest | ✓ |
-| XGBoost | ✓ |
-| LightGBM | ✓ |
-| Gradient Boosting | ✓ |
-| KNN Regressor | ✓ |
+A Panel Mode támogatás **dinamikusan** a modell registry-ből generálódik.
+Minden modell saját maga dönti el a támogatást a `MODEL_INFO.supports_panel_mode` flag-gel.
+
+**Hogyan támogat egy modell Panel Mode-ot:**
+1. Beállítja: `supports_panel_mode=True` a MODEL_INFO-ban
+2. Implementálja: `create_dual_regressor()` metódust
+
+**Aktuálisan támogatott modellek lekérdezése:**
+```python
+from analysis import get_panel_mode_models
+print(get_panel_mode_models())  # Dinamikus lista
+```
+
+**Tipikus támogatott modellek:** Random Forest, XGBoost, LightGBM, Gradient Boosting, KNN Regressor
 
 ## Matematikai háttér
 
@@ -766,29 +773,31 @@ Egyetlen globális modell:
 ### Adat előkészítés
 
 ```python
-def prepare_panel_data(data):
-    """Prepare data for panel mode training."""
-    # Lag features létrehozása
-    for lag in [1, 2, 3, 4, 5]:
-        data[f"Profit_lag_{lag}"] = data.groupby("No.")["Profit"].shift(lag)
+from analysis import prepare_panel_data
 
-    # Target oszlopok (horizontok)
-    data["target_1w"] = data.groupby("No.")["Profit"].shift(-1)
-    data["target_4w"] = data.groupby("No.")["Profit"].shift(-4).rolling(4).sum()
-    data["target_13w"] = data.groupby("No.")["Profit"].shift(-13).rolling(13).sum()
-    # ... stb.
+# Panel adat előkészítés lag feature-ökkel
+x_data, y_data, feature_cols = prepare_panel_data(data)
 
-    return X, Y, feature_columns
+# A függvény automatikusan:
+# - Lag feature-öket hoz létre (1, 2, 4, 8, 13, 26 hét)
+# - Rolling statisztikákat számol (mean, std)
+# - Target oszlopokat generál (1w, 4w, 13w, 26w, 52w)
 ```
 
 ### Time-aware split (Adatszivárgás elkerülése)
 
 ```python
-# Minden stratégiánál: csak a múltbeli adat a tanításhoz
-for strat_id in data["No."].unique():
-    strat_indices = data[data["No."] == strat_id].index
-    split_point = int(len(strat_indices) * 0.8)  # 80% tanítás
-    train_indices.extend(strat_indices[:split_point])
+from analysis import time_aware_split
+
+# Time-aware split - elkerüli az adatszivárgást
+x_train, y_train, x_test, y_test = time_aware_split(
+    x_data, y_data,
+    train_ratio=0.8  # Konfigurálható arány
+)
+
+# A függvény stratégiánként végzi a split-et:
+# - Minden stratégia 80%-a tanításhoz (időrendi sorrendben)
+# - Minden stratégia 20%-a teszteléshez
 ```
 
 ### Előrejelzés
@@ -836,14 +845,22 @@ A **Dual Model** mód **két külön modellt** tanít:
 1. **Activity Model** - Kereskedési aktivitás előrejelzése (klasszifikáció)
 2. **Profit Model** - Profit előrejelzése aktív heteknél (regresszió)
 
-## Támogatott modellek (5 db)
+## Támogatott modellek
 
-Ugyanazok mint Panel Mode:
-- Random Forest
-- XGBoost
-- LightGBM
-- Gradient Boosting
-- KNN Regressor
+A Dual Mode támogatás **dinamikusan** a modell registry-ből generálódik.
+Minden modell saját maga dönti el a támogatást a `MODEL_INFO.supports_dual_mode` flag-gel.
+
+**Hogyan támogat egy modell Dual Mode-ot:**
+1. Beállítja: `supports_dual_mode=True` a MODEL_INFO-ban
+2. Implementálja: `create_dual_regressor()` metódust
+
+**Aktuálisan támogatott modellek lekérdezése:**
+```python
+from analysis import get_dual_mode_models
+print(get_dual_mode_models())  # Dinamikus lista
+```
+
+**Tipikus támogatott modellek:** Random Forest, XGBoost, LightGBM, Gradient Boosting, KNN Regressor
 
 ## Matematikai háttér
 
@@ -924,8 +941,13 @@ for col in y_profit_train.columns:  # 5 horizont
 ### Párhuzamos végrehajtás
 
 ```python
-# Worker pool létrehozás
-pool = multiprocessing.Pool(processes=optimal_workers)
+from analysis.process_utils import init_worker_environment
+
+# Worker pool létrehozás KÖZPONTI inicializálóval
+pool = multiprocessing.Pool(
+    processes=optimal_workers,
+    initializer=init_worker_environment  # GPU letiltás, thread limitek
+)
 
 # Aszinkron task küldés
 async_results = []
@@ -940,6 +962,14 @@ while completed < total_tasks:
             result = ar.get()
             # Activity vagy Profit eredmény szétválogatás
 ```
+
+### Worker inicializálás (process_utils.py)
+
+A `init_worker_environment()` függvény biztosítja a stabil párhuzamos futtatást:
+- **GPU letiltás**: `CUDA_VISIBLE_DEVICES=""` - elkerüli a CUDA context konfliktusokat
+- **FAISS generic mód**: `FAISS_OPT_LEVEL="generic"` - AVX2/CUDA ütközések megelőzése
+- **Thread limitek**: 1 thread/worker - megakadályozza a "halálspirált"
+- **PyTorch konfig**: `torch.set_num_threads(1)` - explicit thread kontroll
 
 ## Eredmény struktúra
 

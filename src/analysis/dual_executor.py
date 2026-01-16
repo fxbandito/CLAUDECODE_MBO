@@ -28,10 +28,8 @@ except ImportError:
     HAS_PSUTIL = False
 
 from analysis.engine import get_resource_manager
-from analysis.dual_task import (
-    train_dual_model_task,
-    init_worker_environment,
-)
+from analysis.process_utils import init_worker_environment
+from analysis.dual_task import train_dual_model_task
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +89,7 @@ def _init_worker_process() -> None:
     """
     Initialize worker process with safe settings.
 
-    Delegates to dual_task.init_worker_environment() and adds priority settings.
+    Delegates to process_utils.init_worker_environment() and adds priority settings.
     """
     # Alap környezet inicializálás (GPU tiltás, szál limitek)
     init_worker_environment()
