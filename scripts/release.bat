@@ -11,4 +11,4 @@ if "%1"=="" (
 )
 
 cd /d "%~dp0.."
-python scripts\release.py %1 %2 %3 %4 %5
+python scripts/release.py %1 %2 %3 %4 %5

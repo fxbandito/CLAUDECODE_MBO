@@ -109,18 +109,54 @@ MODEL_INFO = ModelInfo(
 
 > **FONTOS:** Minden modell egyedi CPU/GPU kezelést kaphat!
 >
-> Nézd meg a régi implementációt ötletekért:
-> **`src_old/analysis/cpu_manager.py`**
+> **Új architektúra fájlok:**
+> - `src/analysis/engine.py` - `ResourceManager` (GUI globális beállítások)
+> - `src/analysis/process_utils.py` - Process management utilities
+> - `src/data/processor.py` - `DataProcessor.detect_data_mode()`
 >
-> Hasznos funkciók a fájlban:
-> - `get_worker_count(mode, data_mode)` - Worker számítás módok szerint
-> - `get_threads_per_worker(mode)` - Thread elosztás workerenként
-> - `init_worker_process()` - Worker inicializálás (prioritás, env vars)
-> - CPU affinity kontroll `psutil.cpu_affinity()`
-> - BLAS thread limit `threadpoolctl.threadpool_limits()`
+> **Elérhető utility függvények:**
+> ```python
+> from analysis.process_utils import (
+>     cleanup_cuda_context,        # CUDA memória cleanup
+>     force_kill_child_processes,  # Worker leállítás
+>     init_worker_environment,     # Worker thread/env config
+>     set_process_priority,        # Process prioritás
+> )
 >
-> Az új rendszerben a `ResourceManager` (src/analysis/engine.py) a GUI globális
-> beállításait kezeli, de **minden modell saját maga dönti el**, hogyan használja!
+> from data.processor import DataProcessor
+> data_mode = DataProcessor.detect_data_mode(df)  # "original"/"forward"/"rolling"
+> groups = DataProcessor.group_strategies(df)     # O(1) stratégia lookup
+>
+> from analysis.engine import AnalysisEngine
+> AnalysisEngine.shutdown()  # Cleanup (workers + CUDA)
+> ```
+>
+> **A modellek SAJÁT MAGUK döntik el**, hogyan használják ezeket!
+>
+> **Régi referencia (csak olvasásra):** `src_old/analysis/cpu_manager.py`
+
+---
+
+## Batch Mode Referencia
+
+> **Batch Mode = Több stratégia egyidejű feldolgozása**
+>
+> **Új architektúra:** A batch a `BaseModel.forecast_batch()` metódusban van!
+> - Default: `joblib.Parallel` párhuzamos feldolgozás
+> - Egyedi: Felülírható modell szinten GPU-optimalizált verzióval
+>
+> **Ha a modell támogatja** (`supports_batch=True`):
+> 1. Default batch automatikusan elérhető
+> 2. Egyedi batch: override `forecast_batch()` metódust
+>
+> **Régi batch fájlok (referencia optimalizált implementációkhoz):**
+> - `src_old/analysis/models/dl_rnn/lstm_batch.py`
+> - `src_old/analysis/models/dl_transformer/autoformer_batch.py`
+> - `src_old/analysis/models/dl_cnn/timesnet_batch.py`
+> - stb. (30+ batch fájl az src_old/analysis/models/ mappában)
+>
+> **FONTOS:** A régi `engine.py`-ban lévő `_run_*_batch()` metódusok
+> az új architektúrában **NEM KELLENEK** - a batch a modellben van!
 
 ---
 
@@ -168,6 +204,42 @@ MODEL_INFO = ModelInfo(
 >
 > if supports_dual_mode(model_name):
 >     results = run_dual_model_mode(data, model_name, params)
+> ```
+
+---
+
+## Opcionális Optimalizációk Referencia
+
+> **FONTOS:** Ezek az optimalizációk a `src_old/analysis/engine.py`-ból származnak.
+> NEM kötelezők - csak akkor implementáld, ha a modell speciális kezelést igényel!
+> Részletes leírás: `MODEL_IMPLEMENTATION_GUIDE.md` szekció 5.4
+>
+> | Optimalizáció | Mikor kell? | Referencia |
+> |---------------|-------------|------------|
+> | GPU Auto-Optimization | DL modellek, sok kis stratégia (>50, <500 sample) | 5.4.1 |
+> | Worker Limit | MoE, KAN, MTGNN - magas RAM/VRAM | 5.4.2 |
+> | Julia-based Sequential | PySR, GPlearn - Julia lock | 5.4.3 |
+> | Rolling Mode Reduction | Ha `detect_data_mode()` = "rolling" | 5.4.4 |
+> | Optimal Workers | Ha egyedi worker számítás kell | 5.4.5 |
+>
+> **Gyors példa - Erőforrás-igényes modell:**
+> ```python
+> def forecast_batch(self, all_data, steps, params):
+>     """Szekvenciális batch - magas memória használat miatt."""
+>     results = {}
+>     for name, data in all_data.items():
+>         results[name] = self.forecast(data, steps, params)
+>         self.cleanup_after_batch()  # FONTOS: memória felszabadítás!
+>     return results
+> ```
+>
+> **Gyors példa - GPU auto-disable:**
+> ```python
+> def forecast_batch(self, all_data, steps, params):
+>     if len(all_data) > 50 and params.get("use_gpu"):
+>         params = {**params, "use_gpu": False}
+>         logger.info("Auto-switched to CPU (many small strategies)")
+>     return super().forecast_batch(all_data, steps, params)
 > ```
 
 ---

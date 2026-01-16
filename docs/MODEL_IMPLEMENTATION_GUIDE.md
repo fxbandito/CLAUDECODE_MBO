@@ -283,7 +283,69 @@ class {ModelName}Model(BaseModel):
 | `supports_panel_mode` | bool | Panel Mode | Ha egy modell hasznalhato az osszes strategiara |
 | `supports_dual_mode` | bool | Dual Mode | Ha kulon activity es profit modell hasznalhato |
 
-### 3.4 Dual Mode Implementacio
+### 3.4 Batch Mode Implementáció
+
+> **FONTOS:** A Batch Mode az új architektúrában **a modell osztályban van**!
+>
+> A régi `src_old/analysis/engine.py`-ban 30+ `_run_*_batch()` metódus volt,
+> ami delegált külön `*_batch.py` fájlokba. Ez **NEM KELL** az új rendszerben!
+>
+> **Új architektúra:**
+> - A `BaseModel.forecast_batch()` metódus a default batch implementáció
+> - Minden modell felülírhatja saját optimalizált batch verzióval
+> - A batch fájlok (`src_old/analysis/models/*_batch.py`) referenciának használhatók
+>
+> **Default batch implementáció (BaseModel-ben):**
+> ```python
+> def forecast_batch(
+>     self,
+>     all_data: Dict[str, List[float]],
+>     steps: int,
+>     params: Dict[str, Any]
+> ) -> Dict[str, List[float]]:
+>     """Batch előrejelzés - párhuzamos feldolgozás."""
+>     from joblib import Parallel, delayed
+>
+>     def _process_single(name: str, data: List[float]):
+>         return name, self.forecast(data, steps, params)
+>
+>     n_jobs = min(os.cpu_count() or 4, len(all_data), 8)
+>     results = Parallel(n_jobs=n_jobs, prefer="threads")(
+>         delayed(_process_single)(name, data)
+>         for name, data in all_data.items()
+>     )
+>     return dict(results)
+> ```
+>
+> **Egyedi batch implementáció (ha szükséges):**
+> ```python
+> class LSTMModel(BaseModel):
+>     MODEL_INFO = ModelInfo(
+>         name="LSTM",
+>         supports_batch=True,  # Engedélyezve
+>         ...
+>     )
+>
+>     def forecast_batch(self, all_data, steps, params):
+>         """
+>         Egyedi batch implementáció GPU-optimalizált verzióval.
+>         Referencia: src_old/analysis/models/dl_rnn/lstm_batch.py
+>         """
+>         # GPU batch processing ha sok stratégia van
+>         if len(all_data) > 100 and self._use_gpu(params):
+>             return self._gpu_batch_forecast(all_data, steps, params)
+>
+>         # Egyébként default batch
+>         return super().forecast_batch(all_data, steps, params)
+> ```
+>
+> **Régi batch fájlok (referencia):**
+> - `src_old/analysis/models/dl_rnn/lstm_batch.py`
+> - `src_old/analysis/models/dl_transformer/autoformer_batch.py`
+> - `src_old/analysis/models/dl_cnn/timesnet_batch.py`
+> - stb.
+
+### 3.5 Dual Mode Implementacio
 
 > **FONTOS:** A Dual Mode **100% modell-fuggetlen** architekturara epul!
 > Az infrastruktura fajlok NEM TARTALMAZNAK semmilyen modell-specifikus kodot.
@@ -395,19 +457,51 @@ method = params.get("method", "default")  # String marad
 
 ## 5. CPU/GPU Kezeles
 
-> **FONTOS REFERENCIA:** Minden modell implementálásakor nézd meg a régi CPU manager fájlt,
-> ami részletes ötleteket ad a CPU/GPU kezeléshez modell szinten:
+> **FONTOS REFERENCIA:** A CPU/GPU kezelés moduláris felépítésű.
 >
-> **`src_old/analysis/cpu_manager.py`**
+> **Új architektúra fájlok:**
+> - `src/analysis/engine.py` - `ResourceManager` singleton (GUI globális beállítások)
+> - `src/analysis/process_utils.py` - Process management utility függvények
+> - `src/data/processor.py` - `DataProcessor.detect_data_mode()` adat mód detektálás
 >
-> Ez a fájl tartalmazza:
-> - Worker process kezelés (multiprocessing.Pool)
-> - CPU affinity kontroll (processek magokhoz kötése)
-> - BLAS/OpenMP thread vezérlés (OMP_NUM_THREADS, MKL_NUM_THREADS)
-> - Környezeti változók beállítása gyermek folyamatokhoz
-> - Normal/Panel/Dual módok worker számítása
-> - Rolling mode memória-biztos worker limitálás
-> - Process prioritás kezelés (Windows/Unix)
+> **Elérhető utility függvények (`src/analysis/process_utils.py`):**
+> ```python
+> from analysis.process_utils import (
+>     cleanup_cuda_context,        # CUDA memória cleanup
+>     force_kill_child_processes,  # Worker processek leállítása
+>     init_worker_environment,     # Worker thread/env beállítás
+>     set_process_priority,        # Process prioritás (Windows/Unix)
+> )
+> ```
+>
+> **Adat mód detektálás (`src/data/processor.py`):**
+> ```python
+> from data.processor import DataProcessor
+>
+> data_mode = DataProcessor.detect_data_mode(df)
+> # Visszatérési értékek: "original", "forward", "rolling"
+> # Rolling mode = több memória, kevesebb worker ajánlott
+> ```
+>
+> **Stratégia előcsoportosítás - O(1) lookup (`src/data/processor.py`):**
+> ```python
+> from data.processor import DataProcessor
+>
+> # Egyszer csoportosít, utána O(1) lookup
+> groups = DataProcessor.group_strategies(df, strategy_col="No.")
+> for strategy_id in strategy_ids:
+>     strat_data = groups[strategy_id]  # GYORS!
+> ```
+>
+> **AnalysisEngine shutdown (`src/analysis/engine.py`):**
+> ```python
+> from analysis.engine import AnalysisEngine
+>
+> # Cleanup hívás (auto-execution végén, hiba után, app bezáráskor)
+> AnalysisEngine.shutdown(protected_pids={12345})  # Védett PID-ek megadhatók
+> ```
+>
+> **Régi referencia (csak olvasásra):** `src_old/analysis/cpu_manager.py`
 
 ### 5.1 GPU Tamogatas Dontes
 
@@ -445,6 +539,144 @@ Ellenorizendo:
 - [ ] Non-blocking data transfer - `non_blocking=True`
 - [ ] GPU memory management - `torch.cuda.empty_cache()`
 - [ ] Mixed precision - `torch.cuda.amp` (advanced)
+
+### 5.4 Opcionális Optimalizációk (Régi engine.py Referencia)
+
+> **FONTOS:** Az alábbi optimalizációk a `src_old/analysis/engine.py`-ból származnak.
+> Ezek NEM kötelezők - minden modell SAJÁT MAGA dönti el, hogy implementálja-e őket!
+> Csak akkor szükségesek, ha a modell speciális kezelést igényel.
+
+#### 5.4.1 GPU Auto-Optimization (Automatikus CPU-ra Váltás)
+
+Ha a modell sok kis stratégiával (~200 sample/stratégia) fut, a GPU overhead
+nagyobb lehet, mint a haszon. Ilyenkor CPU parallel gyorsabb.
+
+```python
+# Referencia: src_old/analysis/engine.py L683-706
+def forecast_batch(self, all_data, steps, params):
+    """Batch feldolgozás GPU auto-optimization-nel."""
+    strategy_count = len(all_data)
+    use_gpu = params.get("use_gpu", True)
+
+    # Automatikus CPU-ra váltás sok stratégia esetén
+    # GPU overhead > benefit kis adatoknál (~200 sample/stratégia)
+    if (use_gpu
+        and strategy_count > 50
+        and self._avg_samples_per_strategy(all_data) < 500):
+        logger.info(
+            "AUTO-OPTIMIZATION: GPU disabled for %s with %d strategies. "
+            "CPU multiprocessing is 2-3x faster for small per-strategy data.",
+            self.MODEL_INFO.name, strategy_count
+        )
+        params = params.copy()
+        params["use_gpu"] = False
+
+    return super().forecast_batch(all_data, steps, params)
+```
+
+**Modellek ahol ez hasznos lehet:**
+- Deep Learning modellek (LSTM, GRU, Transformer, stb.)
+- GFM, Meta-learning (benchmark: CPU 1.7-2.3x gyorsabb kis adatoknál)
+
+#### 5.4.2 Worker Limit Optimization (Erőforrás-Igényes Modellek)
+
+Bizonyos modellek olyan erőforrás-igényesek, hogy szekvenciálisan kell futniuk.
+
+```python
+# Referencia: src_old/analysis/engine.py L752-789
+class MoEModel(BaseModel):
+    MODEL_INFO = ModelInfo(
+        name="MoE",
+        supports_batch=True,
+        # Új attribútumok - opcionálisak:
+        # max_parallel_workers=1,  # Erőforrás-igényes
+        # requires_sequential=True,  # Kötelezően szekvenciális
+    )
+
+    def forecast_batch(self, all_data, steps, params):
+        """Szekvenciális batch - magas RAM/VRAM használat miatt."""
+        # Kötelezően szekvenciális feldolgozás
+        results = {}
+        for name, data in all_data.items():
+            results[name] = self.forecast(data, steps, params)
+            self.cleanup_after_batch()  # Memória felszabadítás stratégiánként!
+        return results
+```
+
+**Modellek ahol ez szükséges lehet:**
+- MoE (Mixture of Experts) - magas paraméter szám
+- KAN - magas számítási költség
+- MTGNN, StemGNN - GPU megosztott state
+
+#### 5.4.3 Julia-Based Models Speciális Kezelése
+
+Julia backend-et használó modellek (pl. PySR) nem futhatnak párhuzamosan
+a Julia lock konfliktusok miatt.
+
+```python
+# Referencia: src_old/analysis/engine.py L759-789
+class PySRModel(BaseModel):
+    MODEL_INFO = ModelInfo(
+        name="PySR",
+        supports_batch=True,
+        # julia_based=True,  # Opcionális jelölés
+    )
+
+    def forecast_batch(self, all_data, steps, params):
+        """Szekvenciális batch - Julia lock miatt."""
+        # Julia nem tud párhuzamosan inicializálódni
+        # SIGABRT ha több worker próbálja egyszerre
+        results = {}
+        for name, data in all_data.items():
+            results[name] = self.forecast(data, steps, params)
+        return results
+```
+
+**Érintett modellek:** PySR, GPlearn (ha Julia backend-et használ)
+
+#### 5.4.4 Rolling Mode Worker Reduction
+
+Rolling feature mode több memóriát használ. Ilyenkor kevesebb worker ajánlott.
+
+```python
+# Referencia: src_old/analysis/engine.py L840-849
+def forecast_batch(self, all_data, steps, params):
+    """Batch feldolgozás rolling mode optimalizációval."""
+    from data.processor import DataProcessor
+
+    # Ha rolling mode, csökkentjük a worker számot
+    data_mode = DataProcessor.detect_data_mode(self._get_sample_df())
+
+    if data_mode == "rolling":
+        n_jobs = min(self.get_n_jobs(), 4)  # Max 4 worker rolling mode-ban
+        logger.info("Rolling mode detected: limiting workers to %d", n_jobs)
+    else:
+        n_jobs = self.get_n_jobs()
+
+    # ... batch feldolgozás n_jobs-szal
+```
+
+#### 5.4.5 Optimal Worker Calculation
+
+A régi engine.py tartalmazott egy `calculate_optimal_workers()` függvényt.
+Az új architektúrában ezt a modell saját maga kezeli a `get_n_jobs()` metódussal.
+
+```python
+# BaseModel-ben már elérhető:
+n_jobs = self.get_n_jobs(max_limit=8)  # ResourceManager alapján
+
+# Ha egyedi logika kell:
+def _calculate_optimal_workers(self, strategy_count: int) -> int:
+    """Optimális worker szám stratégia számtól függően."""
+    base_jobs = self.get_n_jobs()
+
+    # Kevés stratégia = kevesebb worker (overhead elkerülése)
+    if strategy_count <= 10:
+        return min(base_jobs, strategy_count)
+
+    # Sok stratégia = több worker, de max 8
+    return min(base_jobs, 8)
+```
 
 ---
 

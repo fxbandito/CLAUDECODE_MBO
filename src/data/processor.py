@@ -551,3 +551,117 @@ class DataProcessor:
         df["Rank"] = range(1, len(df) + 1)
 
         return df, sort_col
+
+    @staticmethod
+    def group_strategies(
+        df: pd.DataFrame,
+        strategy_col: str = "No.",
+        sort_by: str = "Date",
+        exclude_cols: list = None
+    ) -> dict:
+        """
+        Stratégiák előcsoportosítása O(1) lookup-hoz.
+
+        Ez a PRE_GROUPING optimalizáció - egyszer csoportosít,
+        utána dict lookup O(n) szűrés helyett O(1).
+
+        Használat:
+            - Batch feldolgozásnál sok stratégiával
+            - Párhuzamos végrehajtásnál memória optimalizálás
+            - Bármikor amikor többször kell stratégia adatot lekérni
+
+        Args:
+            df: Bemeneti DataFrame
+            strategy_col: Stratégia azonosító oszlop neve
+            sort_by: Rendezési oszlop (tipikusan "Date")
+            exclude_cols: Kihagyandó oszlopok listája
+
+        Returns:
+            Dict[strategy_id, DataFrame] - előcsoportosított adatok
+
+        Példa:
+            ```python
+            groups = DataProcessor.group_strategies(df)
+            for strategy_id in strategy_ids:
+                strat_data = groups[strategy_id]  # O(1) lookup!
+            ```
+        """
+        if df is None or df.empty:
+            return {}
+
+        if strategy_col not in df.columns:
+            logger.warning("Strategy column '%s' not found", strategy_col)
+            return {}
+
+        # Default exclude columns (MT5 specifikus, nem kellenek a modelleknek)
+        if exclude_cols is None:
+            exclude_cols = [
+                "Start", "1st Candle", "Shift", "Position",
+                "Param. Sum", "SourceFile"
+            ]
+
+        strategy_groups = {}
+        for strat_id, group in df.groupby(strategy_col):
+            # Rendezés ha van ilyen oszlop
+            if sort_by and sort_by in group.columns:
+                sorted_group = group.sort_values(sort_by)
+            else:
+                sorted_group = group
+
+            # Felesleges oszlopok eltávolítása
+            cols_to_drop = [c for c in exclude_cols if c in sorted_group.columns]
+            if cols_to_drop:
+                sorted_group = sorted_group.drop(columns=cols_to_drop)
+
+            strategy_groups[strat_id] = sorted_group
+
+        logger.debug("Pre-grouped %d strategies for O(1) lookup", len(strategy_groups))
+        return strategy_groups
+
+    @staticmethod
+    def detect_data_mode(df: pd.DataFrame) -> str:
+        """
+        Detektálja az adat módot az oszlopnevek alapján.
+
+        Három mód lehetséges:
+        - "rolling": Rolling feature oszlopok jelenléte (több memória kell)
+        - "forward": Forward-looking feature oszlopok jelenléte
+        - "original": Alap mód, feature engineering nélkül
+
+        Használat:
+            - Worker szám optimalizálásnál (rolling = kevesebb worker)
+            - Memória becslésénél
+
+        Args:
+            df: DataFrame az oszlopnevekkel
+
+        Returns:
+            str: "rolling", "forward", vagy "original"
+        """
+        if df is None or df.empty:
+            return "original"
+
+        columns = set(df.columns)
+
+        # Rolling mód indikátorok
+        rolling_indicators = [
+            "feat_rolling_active_ratio",
+            "feat_rolling_profit_consistency",
+            "feat_rolling_sharpe",
+            "feat_rolling_volatility",
+        ]
+
+        if any(col in columns for col in rolling_indicators):
+            return "rolling"
+
+        # Forward mód indikátorok
+        forward_indicators = [
+            "feat_forward_return_1w",
+            "feat_forward_return_4w",
+            "feat_forward_activity_1w",
+        ]
+
+        if any(col in columns for col in forward_indicators):
+            return "forward"
+
+        return "original"

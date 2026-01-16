@@ -9,16 +9,18 @@ ResourceManager: Központi GUI vezérlő a CPU/GPU beállításokhoz.
 AnalysisEngine: Forecasting motor az elemzések futtatásához.
 """
 
+import gc
 import logging
 import os
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 
 import numpy as np
 import pandas as pd
 
+from analysis.process_utils import cleanup_cuda_context, force_kill_child_processes
 from models import get_model_class, get_param_defaults
 
 logger = logging.getLogger(__name__)
@@ -453,6 +455,43 @@ class AnalysisEngine:
         self._progress_callback: Optional[Callable[[AnalysisProgress], None]] = None
         self._lock = threading.Lock()
         self._resource_manager = get_resource_manager()
+        self._protected_pids: Set[int] = set()
+
+    @staticmethod
+    def shutdown(protected_pids: Optional[Set[int]] = None) -> None:
+        """
+        Engine leállítása - worker processek és CUDA cleanup.
+
+        Használat:
+            - Auto-execution cleanup
+            - Alkalmazás bezárásakor
+            - Hiba utáni recovery
+
+        Args:
+            protected_pids: Védett PID-ek (pl. MT5 Tester)
+        """
+        logger.info("AnalysisEngine.shutdown() - cleanup starting...")
+
+        # 1. Worker processek leállítása
+        killed = force_kill_child_processes(protected_pids)
+        if killed > 0:
+            logger.info("Terminated %d worker processes", killed)
+
+        # 2. Python garbage collection
+        gc.collect()
+
+        # 3. CUDA context cleanup
+        cleanup_cuda_context()
+
+        logger.info("AnalysisEngine.shutdown() completed")
+
+    def add_protected_pid(self, pid: int) -> None:
+        """Védett PID hozzáadása (nem lesz kilőve shutdown-nál)."""
+        self._protected_pids.add(pid)
+
+    def remove_protected_pid(self, pid: int) -> None:
+        """Védett PID eltávolítása."""
+        self._protected_pids.discard(pid)
 
     def set_progress_callback(self, callback: Callable[[AnalysisProgress], None]):
         """Progress callback beállítása."""
