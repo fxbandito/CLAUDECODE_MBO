@@ -1,3 +1,13 @@
+v5.4.4 Stable
+- Engine refaktorálás: src_old/engine.py elemzés és modularizáció
+- Új: src/analysis/process_utils.py (CUDA cleanup, worker management)
+- Új: DataProcessor.detect_data_mode() - rolling/forward/original detektálás
+- Új: DataProcessor.group_strategies() - O(1) stratégia lookup
+- BaseModel bővítve: cleanup_after_batch(), get_n_jobs(), should_use_gpu()
+- MODEL_IMPLEMENTATION_GUIDE.md: 5.4 Opcionális Optimalizációk szekció
+- MODEL_IMPLEMENTATION_TEMPLATE.md: Optimalizációk referencia táblázat
+- Dokumentált: GPU auto-optimization, Worker limits, Julia-based models, Rolling mode
+
 v5.4.3 Stable
 - Release
 
