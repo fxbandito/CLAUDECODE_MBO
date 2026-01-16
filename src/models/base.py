@@ -7,8 +7,12 @@ Nincs közös config fájl, nincs keveredés!
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from dataclasses import dataclass
+
+if TYPE_CHECKING:
+    import numpy as np
+    import pandas as pd
 
 
 @dataclass
@@ -19,6 +23,14 @@ class ModelInfo:
     supports_gpu: bool = False
     supports_batch: bool = False
     gpu_threshold: int = 1000  # Minimum adat méret GPU használathoz
+
+    # Feature mode támogatás
+    supports_forward_calc: bool = True  # Támogatja-e a Forward Calc módot
+    supports_rolling_window: bool = True  # Támogatja-e a Rolling Window módot
+
+    # Speciális módok
+    supports_panel_mode: bool = False  # Panel Mode (egy modell minden stratégiára)
+    supports_dual_mode: bool = False  # Dual Model (activity + profit külön)
 
 
 class BaseModel(ABC):
@@ -193,3 +205,33 @@ class BaseModel(ABC):
 
     def __repr__(self) -> str:
         return f"<{self.MODEL_INFO.name} ({self.MODEL_INFO.category})>"
+
+    # =========================================================================
+    # DUAL MODE TÁMOGATÁS (Opcionális - csak ha supports_dual_mode = True)
+    # =========================================================================
+
+    def create_dual_regressor(
+        self,
+        params: Dict[str, Any],
+        n_jobs: int = 1
+    ) -> Any:
+        """
+        Regresszor létrehozása dual mode-hoz.
+
+        Csak azok a modellek implementálják, amelyek támogatják a dual mode-ot.
+        A visszaadott objektumnak rendelkeznie kell fit() és predict() metódusokkal.
+
+        Args:
+            params: Modell paraméterek
+            n_jobs: Párhuzamos szálak száma
+
+        Returns:
+            sklearn-kompatibilis regresszor objektum
+
+        Raises:
+            NotImplementedError: Ha a modell nem támogatja a dual mode-ot
+        """
+        raise NotImplementedError(
+            f"{self.MODEL_INFO.name} does not support dual mode. "
+            f"Set supports_dual_mode=True and implement create_dual_regressor()."
+        )

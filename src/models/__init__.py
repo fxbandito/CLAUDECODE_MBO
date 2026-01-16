@@ -259,6 +259,26 @@ class ModelRegistry:
         info = self.get_model_info(model_name)
         return info.supports_batch if info else False
 
+    def supports_forward_calc(self, model_name: str) -> bool:
+        """Visszaadja, hogy a model támogatja-e a Forward Calc módot."""
+        info = self.get_model_info(model_name)
+        return info.supports_forward_calc if info else True
+
+    def supports_rolling_window(self, model_name: str) -> bool:
+        """Visszaadja, hogy a model támogatja-e a Rolling Window módot."""
+        info = self.get_model_info(model_name)
+        return info.supports_rolling_window if info else True
+
+    def supports_panel_mode(self, model_name: str) -> bool:
+        """Visszaadja, hogy a model támogatja-e a Panel módot."""
+        info = self.get_model_info(model_name)
+        return info.supports_panel_mode if info else False
+
+    def supports_dual_mode(self, model_name: str) -> bool:
+        """Visszaadja, hogy a model támogatja-e a Dual módot."""
+        info = self.get_model_info(model_name)
+        return info.supports_dual_mode if info else False
+
     def get_category_for_model(self, model_name: str) -> Optional[str]:
         """Visszaadja, hogy melyik kategóriában van a model."""
         info = self.get_model_info(model_name)
@@ -312,6 +332,11 @@ def get_model_info(model_name: str) -> Optional[ModelInfo]:
     return get_registry().get_model_info(model_name)
 
 
+def get_model_class(model_name: str) -> Optional[Type['BaseModel']]:
+    """Visszaadja a model osztalyt nev alapjan."""
+    return get_registry().get_model_class(model_name)
+
+
 def get_param_defaults(model_name: str) -> Dict[str, str]:
     """Visszaadja az alapértelmezett paramétereket."""
     return get_registry().get_param_defaults(model_name)
@@ -330,3 +355,23 @@ def supports_gpu(model_name: str) -> bool:
 def supports_batch(model_name: str) -> bool:
     """Támogatja-e a batch módot."""
     return get_registry().supports_batch(model_name)
+
+
+def supports_forward_calc(model_name: str) -> bool:
+    """Támogatja-e a Forward Calc módot."""
+    return get_registry().supports_forward_calc(model_name)
+
+
+def supports_rolling_window(model_name: str) -> bool:
+    """Támogatja-e a Rolling Window módot."""
+    return get_registry().supports_rolling_window(model_name)
+
+
+def supports_panel_mode(model_name: str) -> bool:
+    """Támogatja-e a Panel módot."""
+    return get_registry().supports_panel_mode(model_name)
+
+
+def supports_dual_mode(model_name: str) -> bool:
+    """Támogatja-e a Dual módot."""
+    return get_registry().supports_dual_mode(model_name)

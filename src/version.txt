@@ -1,3 +1,11 @@
+v5.4.2 Stable
+- Dual Mode 100% modell-fuggetlen architektura
+- dual_task.py: tiszta worker infrastruktura (nincs modell kod)
+- dual_executor.py: dinamikus registry-alapu modell lista
+- BaseModel: create_dual_regressor() kotelezo metodus
+- Dokumentacio frissitve (MODEL_IMPLEMENTATION_GUIDE.md, TEMPLATE.md)
+- Nincs fallback - modellek KOTELEZO implementaljak a dual mode-ot
+
 v5.4.1 Stable
 - Teljes kód átvizsgálás és pylint javítások
 - Hiányzó FinancialMetrics modul visszaállítva (analysis/metrics.py)

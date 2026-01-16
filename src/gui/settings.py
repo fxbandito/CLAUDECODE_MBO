@@ -35,6 +35,10 @@ class SettingsManager:
             "muted": True,
             "feature_mode": "Original",
         },
+        "resources": {
+            "cpu_percentage": 85,
+            "gpu_enabled": False,
+        },
     }
 
     def __init__(self):
@@ -209,3 +213,25 @@ class SettingsManager:
         if "preferences" not in self.settings:
             self.settings["preferences"] = {}
         self.settings["preferences"]["feature_mode"] = mode
+
+    # === Resource Settings ===
+
+    def get_cpu_percentage(self) -> int:
+        """Get CPU percentage setting."""
+        return self.settings.get("resources", {}).get("cpu_percentage", 85)
+
+    def set_cpu_percentage(self, percentage: int):
+        """Save CPU percentage setting."""
+        if "resources" not in self.settings:
+            self.settings["resources"] = {}
+        self.settings["resources"]["cpu_percentage"] = max(10, min(100, percentage))
+
+    def get_gpu_enabled(self) -> bool:
+        """Get GPU enabled setting."""
+        return self.settings.get("resources", {}).get("gpu_enabled", False)
+
+    def set_gpu_enabled(self, enabled: bool):
+        """Save GPU enabled setting."""
+        if "resources" not in self.settings:
+            self.settings["resources"] = {}
+        self.settings["resources"]["gpu_enabled"] = enabled

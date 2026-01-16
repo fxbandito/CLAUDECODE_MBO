@@ -8,6 +8,7 @@ Mixin osztály az Analysis tab funkcionalitásához.
 import customtkinter as ctk
 
 from gui.translate import tr
+from analysis.engine import get_resource_manager
 from models import (
     get_categories,
     get_models_in_category,
@@ -15,6 +16,10 @@ from models import (
     get_param_options,
     supports_gpu,
     supports_batch,
+    supports_forward_calc,
+    supports_rolling_window,
+    supports_panel_mode,
+    supports_dual_mode,
 )
 
 
@@ -175,12 +180,15 @@ class AnalysisMixin:
         row2 = ctk.CTkFrame(frame, fg_color="transparent", height=40)
         row2.pack(fill="x", pady=3)
 
-        # CPU Power slider
+        # CPU Power slider - ResourceManager-ből olvassuk az értéket
         ctk.CTkLabel(
             row2,
             text="CPU Power:",
             font=ctk.CTkFont(size=11)
         ).pack(side="left", padx=(0, 5))
+
+        res_mgr = get_resource_manager()
+        initial_cpu = res_mgr.cpu_percentage
 
         self.cpu_slider = ctk.CTkSlider(
             row2,
@@ -190,21 +198,22 @@ class AnalysisMixin:
             width=150,
             command=self._on_cpu_change
         )
-        self.cpu_slider.set(85)
+        self.cpu_slider.set(initial_cpu)
         self.cpu_slider.pack(side="left", padx=(0, 5))
 
-        import multiprocessing
-        cores = multiprocessing.cpu_count()
+        cores = res_mgr.physical_cores
+        used_cores = res_mgr.get_n_jobs()
         self.cpu_label = ctk.CTkLabel(
             row2,
-            text=f"85% ({int(cores * 0.85)} cores)",
+            text=f"{initial_cpu}% ({used_cores} cores)",
             font=ctk.CTkFont(size=11),
             width=100
         )
         self.cpu_label.pack(side="left", padx=(0, 20))
 
-        # Use GPU switch
-        self.var_gpu = ctk.BooleanVar(value=False)
+        # Use GPU switch - ResourceManager-ből olvassuk az értéket
+        initial_gpu = res_mgr.gpu_enabled
+        self.var_gpu = ctk.BooleanVar(value=initial_gpu)
         self.switch_gpu = ctk.CTkSwitch(
             row2,
             text="Use GPU",
@@ -212,6 +221,8 @@ class AnalysisMixin:
             font=ctk.CTkFont(size=11),
             command=self._on_gpu_toggle
         )
+        if initial_gpu:
+            self.switch_gpu.select()
         self.switch_gpu.pack(side="left", padx=(0, 20))
 
         # Panel Mode checkbox
@@ -373,33 +384,36 @@ class AnalysisMixin:
             self.param_widgets[key] = widget
 
     def _update_model_ui_state(self):
-        """Frissíti a UI állapotát az aktuális modell alapján."""
+        """Frissiti a UI allapotat az aktualis modell alapjan."""
         model_name = self.model_var.get()
         if not model_name:
             return
 
-        # GPU switch állapot
+        # GPU switch allapot - csak ha a modell tamogatja
         if supports_gpu(model_name):
             self.switch_gpu.configure(state="normal")
         else:
             self.var_gpu.set(False)
             self.switch_gpu.configure(state="disabled")
 
-        # Batch mode gomb
+        # Batch mode gomb - csak ha a modell tamogatja
         if supports_batch(model_name):
             self.btn_batch_mode.configure(state="normal", fg_color="#5d5d5d")
         else:
             self.btn_batch_mode.configure(state="disabled", fg_color="#444444")
 
-        # Panel és Dual mode checkbox-ok
-        # (mindkettőhöz kell, hogy a modell támogassa a batch-et)
-        if supports_batch(model_name):
+        # Panel mode checkbox - csak ha a modell tamogatja
+        if supports_panel_mode(model_name):
             self.chk_panel_mode.configure(state="normal")
-            self.chk_dual_model.configure(state="normal")
         else:
             self.var_panel_mode.set(False)
-            self.var_dual_model.set(False)
             self.chk_panel_mode.configure(state="disabled")
+
+        # Dual model checkbox - csak ha a modell tamogatja
+        if supports_dual_mode(model_name):
+            self.chk_dual_model.configure(state="normal")
+        else:
+            self.var_dual_model.set(False)
             self.chk_dual_model.configure(state="disabled")
 
     # === Analysis tab eseménykezelők ===
@@ -452,7 +466,7 @@ class AnalysisMixin:
         self._log("Auto Execution window - coming soon...")
 
     def _on_run_analysis(self):
-        """Elemzés indítása."""
+        """Elemzes inditasa."""
         self.sound.play_button_click()
 
         if self.processed_data is None or self.processed_data.empty:
@@ -460,52 +474,286 @@ class AnalysisMixin:
             return
 
         model_name = self.model_var.get()
+
+        # Feature mode kompatibilitas ellenorzes
+        feature_mode = self.feature_var.get() if hasattr(self, 'feature_var') else "Original"
+        if not self._check_feature_mode_compatibility(model_name, feature_mode):
+            return  # Figyelmeztetett es visszaterunk
+
         self._log(f"Starting analysis with {model_name}...")
 
-        # UI állapot frissítése
+        # UI allapot frissitese
         self.btn_run.configure(state="disabled")
         self.btn_stop.configure(state="normal")
         self.btn_pause.configure(state="normal")
 
-        # TODO: Tényleges elemzés indítása háttérszálon
+        # Parameterek osszegyujtese
+        params = self._collect_params()
+        horizon = int(self.horizon_slider.get())
+        use_gpu = self.var_gpu.get() if hasattr(self, 'var_gpu') else False
+        use_batch = False  # Egyelore nem batch mod
+
+        # Analysis engine letrehozasa
+        from analysis.engine import AnalysisEngine, AnalysisContext
+        import threading
+
+        self._analysis_engine = AnalysisEngine()
+        self._analysis_engine.set_progress_callback(self._on_analysis_progress)
+
+        context = AnalysisContext(
+            model_name=model_name,
+            params=params,
+            forecast_horizon=horizon,
+            use_gpu=use_gpu,
+            use_batch=use_batch
+        )
+
+        # Hatterszalon inditasa
+        self._analysis_start_time = __import__('time').time()
+        self._analysis_thread = threading.Thread(
+            target=self._run_analysis_thread,
+            args=(context,),
+            daemon=True
+        )
+        self._analysis_thread.start()
+
+        # Timer inditasa az idokijelzeshez
+        self._start_time_timer()
+
+    def _collect_params(self) -> dict:
+        """Osszegyujti a parametereket a GUI-bol."""
+        params = {}
+        for param_name, widget in self.param_widgets.items():
+            if hasattr(widget, 'get'):
+                params[param_name] = widget.get()
+        return params
+
+    def _run_analysis_thread(self, context):
+        """Hatterszalon az elemzeshez."""
+        try:
+            with self.data_lock:
+                data = self.processed_data.copy() if self.processed_data is not None else None
+
+            if data is None:
+                self._log("No data available!", "error")
+                return
+
+            results = self._analysis_engine.run(data, context)
+
+            # Eredmenyek feldolgozasa a fo szalon
+            self.after(0, lambda: self._on_analysis_complete(results))
+
+        except Exception as e:
+            self._log(f"Analysis error: {e}", "error")
+            import traceback
+            traceback.print_exc()
+            self.after(0, self._reset_analysis_ui)
+
+    def _on_analysis_progress(self, progress):
+        """Progress callback - fo szalra atadashoz."""
+        # A progress callback mas szalrol jon, atiranyitjuk a fo szalra
+        try:
+            self.after(0, lambda p=progress: self._update_analysis_progress(p))
+        except Exception:
+            pass  # GUI mar bezarodhatott
+
+    def _update_analysis_progress(self, progress):
+        """Progress frissites a fo szalon."""
+        if progress.total_strategies > 0:
+            pct = (progress.completed_strategies / progress.total_strategies) * 100
+            self._log(
+                f"Progress: {progress.completed_strategies}/{progress.total_strategies} "
+                f"({pct:.1f}%) - {progress.current_strategy}"
+            )
+
+    def _on_analysis_complete(self, results):
+        """Elemzes befejezese."""
+        self._stop_time_timer()
+
+        success_count = sum(1 for r in results.values() if r.success)
+        total_count = len(results)
+
+        self._log(f"Analysis complete: {success_count}/{total_count} strategies succeeded")
+
+        if results:
+            # Eredmenyek tarolasa a Results tab-hez
+            self._analysis_results = results
+            self._log("Results available in Results tab")
+
+        self._reset_analysis_ui()
+        self.sound.play_model_complete()
+
+    def _reset_analysis_ui(self):
+        """UI visszaallitasa elemzes utan."""
+        self.btn_run.configure(state="normal")
+        self.btn_stop.configure(state="disabled")
+        self.btn_pause.configure(state="disabled")
+        self.btn_pause.configure(text="Pause", fg_color="#f39c12")
+
+    def _start_time_timer(self):
+        """Idozito inditasa."""
+        self._time_timer_running = True
+        self._update_time_display()
+
+    def _stop_time_timer(self):
+        """Idozito leallitasa."""
+        self._time_timer_running = False
+
+    def _update_time_display(self):
+        """Ido kijelzes frissitese."""
+        if not getattr(self, '_time_timer_running', False):
+            return
+
+        import time
+        elapsed = time.time() - getattr(self, '_analysis_start_time', time.time())
+        hours = int(elapsed // 3600)
+        minutes = int((elapsed % 3600) // 60)
+        seconds = int(elapsed % 60)
+        self.time_label.configure(text=f"Time: {hours:02d}:{minutes:02d}:{seconds:02d}")
+
+        # Kovetkezo frissites 1 mp mulva
+        self.after(1000, self._update_time_display)
+
+    def _check_feature_mode_compatibility(self, model_name: str, feature_mode: str) -> bool:
+        """
+        Ellenorzi a feature mode kompatibilitast es figyelmeztet ha szukseges.
+
+        Args:
+            model_name: Modell neve
+            feature_mode: Feature mod (Original, Forward Calc, Rolling Window)
+
+        Returns:
+            True ha kompatibilis vagy a felhasznalo elfogadja, False ha visszavon
+        """
+        # Ellenorizzuk, hogy a modell tamogatja-e a feature modot
+        if feature_mode == "Forward Calc" and not supports_forward_calc(model_name):
+            warning_msg = (
+                f"WARNING: {model_name} does not support Forward Calc mode!\n\n"
+                f"This model works best with raw (Original) data.\n"
+                f"Forward Calc features may distort the forecast results.\n\n"
+                f"Please switch to 'Original' mode in the Data Loading tab\n"
+                f"for optimal results."
+            )
+            self._log(warning_msg, "warning")
+            self._show_feature_warning_popup(model_name, feature_mode, warning_msg)
+            return False
+
+        if feature_mode == "Rolling Window" and not supports_rolling_window(model_name):
+            warning_msg = (
+                f"WARNING: {model_name} does not support Rolling Window mode!\n\n"
+                f"This model works best with raw (Original) data.\n"
+                f"Rolling Window features may hide important patterns.\n\n"
+                f"Please switch to 'Original' mode in the Data Loading tab\n"
+                f"for optimal results."
+            )
+            self._log(warning_msg, "warning")
+            self._show_feature_warning_popup(model_name, feature_mode, warning_msg)
+            return False
+
+        return True
+
+    def _show_feature_warning_popup(self, model_name: str, feature_mode: str, message: str):
+        """Feature mode figyelmeztetest megjelenito popup."""
+        popup = ctk.CTkToplevel(self)
+        popup.title(f"{model_name} - Feature Mode Warning")
+        popup.geometry("500x300")
+        popup.transient(self)
+        popup.grab_set()
+
+        # Warning icon and title
+        title_frame = ctk.CTkFrame(popup, fg_color="transparent")
+        title_frame.pack(fill="x", padx=20, pady=(20, 10))
+
+        ctk.CTkLabel(
+            title_frame,
+            text="Feature Mode Incompatibility",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color="#e74c3c"
+        ).pack()
+
+        # Message
+        text = ctk.CTkTextbox(popup, font=ctk.CTkFont(size=12), height=150)
+        text.pack(fill="both", expand=True, padx=20, pady=10)
+        text.insert("1.0", message)
+        text.configure(state="disabled")
+
+        # Buttons
+        btn_frame = ctk.CTkFrame(popup, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=20, pady=(10, 20))
+
+        ctk.CTkButton(
+            btn_frame,
+            text="OK - I understand",
+            width=150,
+            fg_color="#3498db",
+            command=popup.destroy
+        ).pack(side="right", padx=5)
 
     def _on_stop_analysis(self):
         """Elemzés leállítása."""
         self.sound.play_button_click()
         self._log("Stopping analysis...")
-        self.btn_run.configure(state="normal")
-        self.btn_stop.configure(state="disabled")
-        self.btn_pause.configure(state="disabled")
+
+        # Engine leallitasa
+        if hasattr(self, '_analysis_engine') and self._analysis_engine:
+            self._analysis_engine.cancel()
+
+        self._stop_time_timer()
+        self._reset_analysis_ui()
 
     def _on_pause_analysis(self):
         """Elemzés szüneteltetése/folytatása."""
         self.sound.play_button_click()
         if self.btn_pause.cget("text") == "Pause":
-            # Resume = zöld (mint az eredetiben)
+            # Pause
+            if hasattr(self, '_analysis_engine') and self._analysis_engine:
+                self._analysis_engine.pause()
+
             self.btn_pause.configure(
                 text="Resume", fg_color="#27ae60", hover_color="#2ecc71"
             )
             self._log("Analysis paused.")
         else:
-            # Pause = sárga (mint az eredetiben)
+            # Resume
+            if hasattr(self, '_analysis_engine') and self._analysis_engine:
+                self._analysis_engine.resume()
+
             self.btn_pause.configure(
                 text="Pause", fg_color="#f39c12", hover_color="#d35400"
             )
             self._log("Analysis resumed.")
 
     def _on_cpu_change(self, value: float):
-        """CPU slider változás."""
-        import multiprocessing
-        cores = multiprocessing.cpu_count()
+        """CPU slider változás - szinkronizálás ResourceManager-rel."""
+        res_mgr = get_resource_manager()
         pct = int(value)
-        used_cores = int(cores * pct / 100)
+
+        # ResourceManager frissítése
+        res_mgr.set_cpu_percentage(pct)
+
+        # UI frissítése
+        used_cores = res_mgr.get_n_jobs()
         self.cpu_label.configure(text=f"{pct}% ({used_cores} cores)")
 
     def _on_gpu_toggle(self):
-        """GPU toggle."""
+        """GPU toggle - szinkronizálás ResourceManager-rel."""
         self.sound.play_toggle_switch()
-        state = "enabled" if self.var_gpu.get() else "disabled"
-        self._log(f"GPU {state}")
+
+        res_mgr = get_resource_manager()
+        enabled = self.var_gpu.get()
+
+        # ResourceManager frissítése
+        res_mgr.set_gpu_enabled(enabled)
+
+        # Státusz log
+        if enabled and not res_mgr.gpu_available:
+            self._log("GPU not available on this system", "warning")
+            self.var_gpu.set(False)
+            self.switch_gpu.deselect()
+        else:
+            state = "enabled" if res_mgr.gpu_enabled else "disabled"
+            gpu_info = f" ({res_mgr.gpu_name})" if res_mgr.gpu_name else ""
+            self._log(f"GPU {state}{gpu_info}")
 
     def _on_panel_mode_change(self):
         """Panel mode váltás."""

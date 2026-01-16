@@ -25,6 +25,8 @@ from gui.tabs.results import ResultsMixin
 from gui.tabs.comparison import ComparisonMixin
 from gui.tabs.inspection import InspectionTabMixin
 
+from analysis.engine import get_resource_manager
+
 
 def get_version() -> str:
     """Verzió beolvasása a version.txt fájlból."""
@@ -62,6 +64,10 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ComparisonMixin, Ins
 
         # Translator
         self.translator = get_translator()
+
+        # Resource manager (CPU/GPU control)
+        self.resource_manager = get_resource_manager()
+        self._init_resource_manager()
 
         # Verzió
         self.version = get_version()
@@ -188,6 +194,19 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ComparisonMixin, Ins
         )
         self.settings.save()
 
+    def _init_resource_manager(self):
+        """Initialize ResourceManager with saved settings."""
+        cpu_pct = self.settings.get_cpu_percentage()
+        gpu_enabled = self.settings.get_gpu_enabled()
+
+        self.resource_manager.set_cpu_percentage(cpu_pct)
+        self.resource_manager.set_gpu_enabled(gpu_enabled)
+
+    def _save_resource_settings(self):
+        """Save current resource settings."""
+        self.settings.set_cpu_percentage(self.resource_manager.cpu_percentage)
+        self.settings.set_gpu_enabled(self.resource_manager.gpu_enabled)
+
     def _save_settings_now(self):
         """Save settings immediately (crash protection)."""
         self.settings.set_window_geometry(
@@ -200,6 +219,8 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ComparisonMixin, Ins
         self.settings.set_dark_mode(self.is_dark_mode)
         self.settings.set_muted(self.is_muted)
         self.settings.set_feature_mode(self.feature_var.get())
+        # Save resource settings
+        self._save_resource_settings()
         # Also save folder paths
         self.save_window_state()
 
