@@ -103,6 +103,11 @@ MODEL_INFO = ModelInfo(
 )
 ```
 
+**supports_batch megjegyzés:**
+- Ha `True`: BATCH MODE gomb engedélyezve a GUI-ban
+- **DE** alapértelmezetten **KI van kapcsolva** (szekvenciális mód)
+- A felhasználónak kattintania kell a gombra a batch mód aktiválásához
+
 ---
 
 ## CPU/GPU Kezeles Referencia
@@ -141,12 +146,24 @@ MODEL_INFO = ModelInfo(
 
 > **Batch Mode = Több stratégia egyidejű feldolgozása**
 >
+> ### GUI Működés
+>
+> **FONTOS:** A Batch Mode alapértelmezetten **KI van kapcsolva**!
+> - A felhasználónak **kattintania kell** a BATCH MODE gombra a bekapcsoláshoz
+> - A gomb állapota:
+>   - **Szürke** + "BATCH MODE" = kikapcsolva (szekvenciális feldolgozás)
+>   - **Zöld** + "BATCH: ON" = bekapcsolva (párhuzamos feldolgozás)
+> - Ha a modell nem támogatja (`supports_batch=False`) → gomb letiltva
+> - Elemzés indításakor a log kiírja: `(BATCH MODE)` vagy `(Single Mode)`
+>
+> ### Implementáció
+>
 > **Új architektúra:** A batch a `BaseModel.forecast_batch()` metódusban van!
 > - Default: `joblib.Parallel` párhuzamos feldolgozás
 > - Egyedi: Felülírható modell szinten GPU-optimalizált verzióval
 >
 > **Ha a modell támogatja** (`supports_batch=True`):
-> 1. Default batch automatikusan elérhető
+> 1. Default batch automatikusan elérhető (BaseModel-ből)
 > 2. Egyedi batch: override `forecast_batch()` metódust
 >
 > **Régi batch fájlok (referencia optimalizált implementációkhoz):**
@@ -250,7 +267,7 @@ A `src/models/__init__.py` MODEL_ORDER alapjan:
 
 ### Statistical Models
 1. ~~ADIDA~~ [KESZ]
-2. ARIMA
+2. ~~ARIMA~~ [KESZ]
 3. ARIMAX
 4. Auto-ARIMA
 5. CES
@@ -363,5 +380,5 @@ A `src/models/__init__.py` MODEL_ORDER alapjan:
 ---
 
 **Osszes modell szama: ~70**
-**Implementalt: 1 (ADIDA)**
-**Hatralevo: ~69**
+**Implementalt: 2 (ADIDA, ARIMA)**
+**Hatralevo: ~68**

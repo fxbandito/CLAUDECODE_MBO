@@ -450,12 +450,19 @@ class AnalysisEngine:
         results = engine.run(data, context)
     """
 
+    # Progress throttling beállítások - GUI lelassulás elkerülésére
+    PROGRESS_MIN_INTERVAL_MS = 100  # Minimum 100ms két GUI frissítés között
+    PROGRESS_MIN_PERCENT_CHANGE = 1.0  # Minimum 1% változás a frissítéshez
+
     def __init__(self):
         self._progress = AnalysisProgress()
         self._progress_callback: Optional[Callable[[AnalysisProgress], None]] = None
         self._lock = threading.Lock()
         self._resource_manager = get_resource_manager()
         self._protected_pids: Set[int] = set()
+        # Throttling állapot
+        self._last_progress_time: float = 0.0
+        self._last_progress_percent: float = 0.0
 
     @staticmethod
     def shutdown(protected_pids: Optional[Set[int]] = None) -> None:
@@ -497,13 +504,47 @@ class AnalysisEngine:
         """Progress callback beállítása."""
         self._progress_callback = callback
 
-    def _notify_progress(self):
-        """Callback értesítése a haladásról."""
-        if self._progress_callback:
-            try:
-                self._progress_callback(self._progress)
-            except Exception as e:
-                logger.warning("Progress callback error: %s", e)
+    def _notify_progress(self, force: bool = False):
+        """
+        Callback értesítése a haladásról - THROTTLED.
+
+        A GUI lelassulás elkerülésére csak akkor küldünk értesítést, ha:
+        - force=True (kezdés, befejezés, cancel/pause)
+        - VAGY legalább PROGRESS_MIN_INTERVAL_MS ms eltelt az utolsó óta
+        - VAGY legalább PROGRESS_MIN_PERCENT_CHANGE % változás történt
+
+        Args:
+            force: Kényszerített értesítés (bypass throttling)
+        """
+        if not self._progress_callback:
+            return
+
+        current_time = time.time() * 1000  # ms
+
+        # Százalék számítás
+        if self._progress.total_strategies > 0:
+            current_percent = (self._progress.completed_strategies /
+                               self._progress.total_strategies) * 100
+        else:
+            current_percent = 0.0
+
+        # Throttling ellenőrzés (hacsak nem force)
+        if not force:
+            time_diff = current_time - self._last_progress_time
+            percent_diff = abs(current_percent - self._last_progress_percent)
+
+            # Csak akkor frissítünk, ha elég idő telt el VAGY elég nagy a változás
+            if time_diff < self.PROGRESS_MIN_INTERVAL_MS and \
+               percent_diff < self.PROGRESS_MIN_PERCENT_CHANGE:
+                return  # Skip this update
+
+        # Callback hívás
+        try:
+            self._progress_callback(self._progress)
+            self._last_progress_time = current_time
+            self._last_progress_percent = current_percent
+        except Exception as e:
+            logger.warning("Progress callback error: %s", e)
 
     def extract_strategies(
         self,
@@ -579,7 +620,7 @@ class AnalysisEngine:
             logger.warning("No strategies found in data")
             return {}
 
-        # Progress inicializálás
+        # Progress inicializálás + throttling reset
         with self._lock:
             self._progress = AnalysisProgress(
                 total_strategies=len(strategies),
@@ -588,8 +629,10 @@ class AnalysisEngine:
                 is_paused=False,
                 is_cancelled=False
             )
+        self._last_progress_time = 0.0
+        self._last_progress_percent = 0.0
 
-        self._notify_progress()
+        self._notify_progress(force=True)  # Kezdés - mindig értesítünk
 
         # Modell betöltése
         model_class = get_model_class(context.model_name)
@@ -622,7 +665,7 @@ class AnalysisEngine:
             self._progress.elapsed_seconds = time.time() - start_time
             self._progress.results = results
 
-        self._notify_progress()
+        self._notify_progress(force=True)  # Befejezés - mindig értesítünk
 
         return results
 
@@ -633,8 +676,10 @@ class AnalysisEngine:
         context: AnalysisContext,
         params: Dict[str, Any]
     ) -> Dict[str, AnalysisResult]:
-        """Szekvenciális feldolgozás."""
+        """Szekvenciális feldolgozás - optimalizált progress throttling-gel."""
         results = {}
+        error_count = 0
+        total = len(strategies)
 
         for i, (strategy_id, values) in enumerate(strategies.items()):
             # Cancel/pause flag ellenőrzés
@@ -647,9 +692,7 @@ class AnalysisEngine:
 
                 self._progress.current_strategy = strategy_id
 
-            self._notify_progress()
-
-            # Forecast futtatása
+            # Forecast futtatása (GUI frissítés CSAK utána, throttled)
             start = time.perf_counter()
             try:
                 forecasts = model.forecast(values, context.forecast_horizon, params)
@@ -670,14 +713,23 @@ class AnalysisEngine:
                     success=False,
                     error=str(e)
                 )
-                logger.warning("Forecast error for strategy %s: %s", strategy_id, e)
+                error_count += 1
+                # Csak az első néhány hibát logoljuk részletesen
+                if error_count <= 5:
+                    logger.warning("Forecast error for strategy %s: %s", strategy_id, e)
+                elif error_count == 6:
+                    logger.warning("Further forecast errors will be suppressed...")
 
-            # Progress frissítés
+            # Progress frissítés (throttled - nem minden stratégiánál fut ténylegesen)
             with self._lock:
                 self._progress.completed_strategies = i + 1
                 self._progress.results[strategy_id] = results[strategy_id]
 
-            self._notify_progress()
+            self._notify_progress()  # Throttled - csak ~10x/sec fog ténylegesen frissíteni
+
+        # Összesített hiba log ha sok volt
+        if error_count > 5:
+            logger.warning("Total forecast errors: %d/%d strategies", error_count, total)
 
         return results
 
@@ -694,7 +746,7 @@ class AnalysisEngine:
         with self._lock:
             self._progress.current_strategy = "BATCH MODE"
 
-        self._notify_progress()
+        self._notify_progress(force=True)  # Batch kezdés
 
         start = time.perf_counter()
         try:
@@ -730,7 +782,7 @@ class AnalysisEngine:
             self._progress.completed_strategies = len(strategies)
             self._progress.results = results
 
-        self._notify_progress()
+        self._notify_progress(force=True)  # Batch befejezés
 
         return results
 

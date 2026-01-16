@@ -1,3 +1,15 @@
+v5.4.8 Stable
+- ARIMA model implementáció (statsmodels alapú, trend auto-korrekció)
+- GUI Batch Mode toggle gomb (alapértelmezett: KI, zöld ha aktív)
+- Batch mode állapot kijelzés a logban: (BATCH MODE) / (Single Mode)
+- Progress throttling optimalizálás (100ms min, 1% min változás)
+- ARIMA validation report és teszt file (9/9 teszt PASS)
+- Dokumentáció frissítés: MODEL_IMPLEMENTATION_GUIDE.md, TEMPLATE.md
+
+v5.4.7 Stable
+- Report generation fixes
+- ADIDA model improvements
+
 v5.4.6 Stable
 - Results tab automatikus aktiválás analysis után (gombok aktívak)
 - Automatikus .pkl mentés Data_raw mappába (régi formátum: timestamp_method_currency.pkl)

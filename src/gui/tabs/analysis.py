@@ -102,7 +102,8 @@ class AnalysisMixin:
         )
         self.btn_model_help.pack(side="left", padx=5)
 
-        # BATCH MODE gomb
+        # BATCH MODE toggle gomb
+        self.var_batch_mode = False  # Batch mode allapot
         self.btn_batch_mode = ctk.CTkButton(
             row1,
             text="BATCH MODE",
@@ -111,7 +112,8 @@ class AnalysisMixin:
             fg_color="#444444",
             hover_color="#555555",
             font=ctk.CTkFont(size=10, weight="bold"),
-            state="disabled"
+            state="disabled",
+            command=self._on_batch_mode_toggle
         )
         self.btn_batch_mode.pack(side="left", padx=(0, 10))
 
@@ -398,9 +400,20 @@ class AnalysisMixin:
 
         # Batch mode gomb - csak ha a modell tamogatja
         if supports_batch(model_name):
-            self.btn_batch_mode.configure(state="normal", fg_color="#5d5d5d")
+            self.btn_batch_mode.configure(state="normal")
+            # Ha mar aktiv volt, megtartjuk a zold szint
+            if getattr(self, 'var_batch_mode', False):
+                self.btn_batch_mode.configure(fg_color="#27ae60", text="BATCH: ON")
+            else:
+                self.btn_batch_mode.configure(fg_color="#5d5d5d", text="BATCH MODE")
         else:
-            self.btn_batch_mode.configure(state="disabled", fg_color="#444444")
+            # Nem tamogatott - kikapcsoljuk es letiltjuk
+            self.var_batch_mode = False
+            self.btn_batch_mode.configure(
+                state="disabled",
+                fg_color="#444444",
+                text="BATCH MODE"
+            )
 
         # Panel mode checkbox - csak ha a modell tamogatja
         if supports_panel_mode(model_name):
@@ -480,7 +493,9 @@ class AnalysisMixin:
         if not self._check_feature_mode_compatibility(model_name, feature_mode):
             return  # Figyelmeztetett es visszaterunk
 
-        self._log(f"Starting analysis with {model_name}...")
+        # Batch mode allapot log
+        batch_status = "BATCH MODE" if getattr(self, 'var_batch_mode', False) else "Single Mode"
+        self._log(f"Starting analysis with {model_name} ({batch_status})...")
 
         # UI allapot frissitese
         self.btn_run.configure(state="disabled")
@@ -491,7 +506,7 @@ class AnalysisMixin:
         params = self._collect_params()
         horizon = int(self.horizon_slider.get())
         use_gpu = self.var_gpu.get() if hasattr(self, 'var_gpu') else False
-        use_batch = False  # Egyelore nem batch mod
+        use_batch = getattr(self, 'var_batch_mode', False)  # Batch mode a gombbol
 
         # Analysis engine letrehozasa
         from analysis.engine import AnalysisEngine, AnalysisContext
@@ -507,6 +522,9 @@ class AnalysisMixin:
             use_gpu=use_gpu,
             use_batch=use_batch
         )
+
+        # Log throttling reset
+        self._last_logged_percent = -10
 
         # Hatterszalon inditasa
         self._analysis_start_time = __import__('time').time()
@@ -558,19 +576,26 @@ class AnalysisMixin:
             pass  # GUI mar bezarodhatott
 
     def _update_analysis_progress(self, progress):
-        """Progress frissites a fo szalon."""
+        """Progress frissites a fo szalon - optimalizalt log throttling-gel."""
         if progress.total_strategies > 0:
             pct = progress.completed_strategies / progress.total_strategies
 
             # Progress bar frissitese (0.0 - 1.0)
             self.set_progress(pct)
 
-            # Debug level - csak file-ba kerul, GUI-ban nem jelenik meg
-            self._log(
-                f"Progress: {progress.completed_strategies}/{progress.total_strategies} "
-                f"({pct*100:.1f}%) - {progress.current_strategy}",
-                "debug"
-            )
+            # Debug log CSAK 10%-onkent (ne terheljuk a log rendszert)
+            pct_int = int(pct * 100)
+            if not hasattr(self, '_last_logged_percent'):
+                self._last_logged_percent = -10
+
+            # Log csak ha legalabb 10%-ot leptunk vagy befejezodott
+            if pct_int >= self._last_logged_percent + 10 or pct >= 1.0:
+                self._last_logged_percent = pct_int
+                self._log(
+                    f"Progress: {progress.completed_strategies}/{progress.total_strategies} "
+                    f"({pct_int}%)",
+                    "debug"
+                )
 
     def _on_analysis_complete(self, results):
         """Elemzes befejezese."""
@@ -958,6 +983,31 @@ class AnalysisMixin:
     def _on_horizon_change(self, value: float):
         """Forecast horizon változás."""
         self.horizon_label.configure(text=str(int(value)))
+
+    def _on_batch_mode_toggle(self):
+        """Batch mode toggle - gomb allapotanak valtoztatasa."""
+        self.sound.play_button_click()
+
+        # Allapot valtas
+        self.var_batch_mode = not self.var_batch_mode
+
+        # Vizualis visszajelzes a gomb szinevel
+        if self.var_batch_mode:
+            # Aktiv batch mode - zold szin
+            self.btn_batch_mode.configure(
+                fg_color="#27ae60",
+                hover_color="#2ecc71",
+                text="BATCH: ON"
+            )
+            self._log("Batch mode ENABLED - will process strategies in parallel")
+        else:
+            # Inaktiv batch mode - sotet szurke
+            self.btn_batch_mode.configure(
+                fg_color="#5d5d5d",
+                hover_color="#6d6d6d",
+                text="BATCH MODE"
+            )
+            self._log("Batch mode DISABLED - will process strategies sequentially")
 
     def _show_model_help(self):
         """Model help popup."""

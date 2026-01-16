@@ -287,6 +287,49 @@ class {ModelName}Model(BaseModel):
 
 > **FONTOS:** A Batch Mode az új architektúrában **a modell osztályban van**!
 >
+> ### GUI Működés - BATCH MODE Gomb
+>
+> A GUI-ban a Batch Mode egy **toggle gomb**, amely:
+> - **Alapértelmezetten KI van kapcsolva** - a modell normál (szekvenciális) módban fut
+> - **Csak ha a felhasználó bekapcsolja**, akkor fut batch módban
+> - A gomb állapota vizuálisan jelzi a módot:
+>   - **Szürke** + "BATCH MODE" = kikapcsolva (szekvenciális feldolgozás)
+>   - **Zöld** + "BATCH: ON" = bekapcsolva (párhuzamos feldolgozás)
+>
+> **GUI kezelés (`src/gui/tabs/analysis.py`):**
+> ```python
+> # Batch mode toggle gomb
+> self.var_batch_mode = False  # Alapértelmezett: KI
+> self.btn_batch_mode = ctk.CTkButton(
+>     ...,
+>     state="disabled",  # Letiltva ha a modell nem támogatja
+>     command=self._on_batch_mode_toggle
+> )
+>
+> def _on_batch_mode_toggle(self):
+>     """Batch mode toggle - gomb állapotának változtatása."""
+>     self.var_batch_mode = not self.var_batch_mode
+>     if self.var_batch_mode:
+>         self.btn_batch_mode.configure(fg_color="#27ae60", text="BATCH: ON")
+>     else:
+>         self.btn_batch_mode.configure(fg_color="#5d5d5d", text="BATCH MODE")
+>
+> def _on_run_analysis(self):
+>     use_batch = getattr(self, 'var_batch_mode', False)  # Gombból olvassuk
+>     # ...
+> ```
+>
+> **Modell váltáskor:**
+> - Ha a modell támogatja a batch mode-ot → gomb engedélyezve
+> - Ha NEM támogatja → gomb letiltva, állapot resetelve
+>
+> **Log kijelzés:**
+> Az elemzés indításakor a log üzenet tartalmazza a batch mode állapotot:
+> ```
+> Starting analysis with ARIMA (BATCH MODE)...
+> Starting analysis with ARIMA (Single Mode)...
+> ```
+>
 > A régi `src_old/analysis/engine.py`-ban 30+ `_run_*_batch()` metódus volt,
 > ami delegált külön `*_batch.py` fájlokba. Ez **NEM KELL** az új rendszerben!
 >
@@ -851,6 +894,12 @@ A GUI automatikusan:
 - Letiltja a Panel Mode-ot ha `supports_panel_mode=False`
 - Letiltja a Dual Mode-ot ha `supports_dual_mode=False`
 - Figyelmeztetest mutat ha a Feature Mode nem kompatibilis
+
+**Batch Mode gomb viselkedés:**
+- Alapértelmezetten **KI** van kapcsolva (szürke gomb)
+- A felhasználónak **kattintania kell** a bekapcsoláshoz (zöld gomb)
+- Elemzés indításakor a log kiírja: `(BATCH MODE)` vagy `(Single Mode)`
+- Ha a modell nem támogatja → gomb letiltva, állapot resetelve
 
 ### 6.3 Ellenorzes
 

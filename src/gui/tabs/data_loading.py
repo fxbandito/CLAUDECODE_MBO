@@ -246,7 +246,7 @@ class DataLoadingMixin:
             initialdir=initial_dir
         )
         if folder:
-            self.settings.set_last_folder(folder)
+            self.last_open_folder = folder
             self._save_settings_now()
             self.folder_label.configure(text=folder)
             self._log(f"{tr('Loading folder:')} {folder}")
@@ -294,7 +294,7 @@ class DataLoadingMixin:
             initialdir=initial_dir
         )
         if files:
-            self.settings.set_last_parquet_folder(os.path.dirname(files[0]))
+            self.last_parquet_folder = os.path.dirname(files[0])
             self._save_settings_now()
             self.folder_label.configure(text=f"{len(files)} {tr('parquet file(s) selected')}")
             self._log(f"{tr('Loading files...')} ({len(files)} parquet)")
@@ -341,7 +341,7 @@ class DataLoadingMixin:
             initialdir=initial_dir
         )
         if folder:
-            self.settings.set_last_convert_folder(folder)
+            self.last_convert_folder = folder
             self._save_settings_now()
             self._log(f"{tr('Converting Excel files in:')} {folder}")
             threading.Thread(target=self._convert_excel, args=(folder,), daemon=True).start()
