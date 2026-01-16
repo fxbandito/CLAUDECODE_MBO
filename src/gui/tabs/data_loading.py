@@ -3,6 +3,7 @@ Data Loading Tab - MBO Trading Strategy Analyzer
 Mixin osztaly a Data Loading tab funkcioinalisatasahoz.
 """
 # pylint: disable=too-many-instance-attributes,attribute-defined-outside-init
+# pylint: disable=broad-exception-caught
 
 import gc
 import os

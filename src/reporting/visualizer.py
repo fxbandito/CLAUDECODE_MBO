@@ -1,6 +1,7 @@
 """Visualization module for creating charts and plots for analysis reports."""
 
-# pylint: disable=import-outside-toplevel, wrong-import-position
+# pylint: disable=import-outside-toplevel, wrong-import-position, use-dict-literal
+# Note: use-dict-literal disabled because dict() is more readable in Plotly code.
 import logging
 import os
 

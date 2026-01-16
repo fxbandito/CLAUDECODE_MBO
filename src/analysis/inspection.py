@@ -4,8 +4,8 @@ Inspection Engine - Compare forecast reports with actual benchmark results.
 import os
 import re
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass, field
+from typing import Dict, List, Tuple
+from dataclasses import dataclass
 
 import pandas as pd
 
@@ -106,7 +106,7 @@ class InspectionEngine:
             try:
                 records = self._parse_single_md_file(file_path)
                 self.forecasts.extend(records)
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 print(f"Error parsing {filename}: {e}")
 
         return self.forecasts
@@ -274,7 +274,7 @@ class InspectionEngine:
 
         try:
             df = pd.read_excel(excel_path, header=None)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             print(f"Error loading Excel: {e}")
             return self.benchmarks
 
@@ -320,7 +320,7 @@ class InspectionEngine:
                 if week_data:
                     weekly_results[week + 1] = week_data
 
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 continue
 
         return weekly_results
@@ -339,6 +339,9 @@ class InspectionEngine:
         """
         # Sum profits for each strategy over the weeks
         strategy_profits = {}
+
+        if not weekly_results:
+            return []
 
         for week in range(1, min(num_weeks + 1, max(weekly_results.keys()) + 1)):
             if week not in weekly_results:

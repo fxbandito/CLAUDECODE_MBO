@@ -1,6 +1,8 @@
 """
 Inspection Tab - Compare forecast reports with actual benchmark results.
 """
+# pylint: disable=broad-exception-caught
+
 import os
 import sys
 import subprocess
@@ -386,10 +388,11 @@ class InspectionTabMixin:
                 self._log(f"MT5 GUI not found at: {mt5_gui_path}")
                 return
 
-            # Launch as completely independent process
+            # Launch as completely independent process (not using 'with' intentionally -
+            # we don't want to wait for the subprocess to finish)
             if sys.platform == "win32":
                 # CREATE_NEW_PROCESS_GROUP + DETACHED_PROCESS = fully independent
-                subprocess.Popen(
+                subprocess.Popen(  # pylint: disable=consider-using-with
                     [sys.executable, mt5_gui_path],
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
                     close_fds=True,
@@ -397,7 +400,7 @@ class InspectionTabMixin:
                     stderr=subprocess.DEVNULL
                 )
             else:
-                subprocess.Popen(
+                subprocess.Popen(  # pylint: disable=consider-using-with
                     [sys.executable, mt5_gui_path],
                     start_new_session=True,
                     stdout=subprocess.DEVNULL,

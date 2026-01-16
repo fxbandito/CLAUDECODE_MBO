@@ -1,6 +1,8 @@
 """
 MT5 Backtester GUI - A graphical interface for running MT5 Strategy Tester.
 """
+# pylint: disable=broad-exception-caught,attribute-defined-outside-init
+
 import json
 import os
 import re
@@ -409,7 +411,7 @@ class CalendarPopup(ctk.CTkToplevel):
                     lbl = ctk.CTkLabel(week_frame, text="", width=35)
                     lbl.pack(side="left", padx=1, pady=1)
                 else:
-                    is_selected = (day == self.selected_day)
+                    is_selected = day == self.selected_day
                     btn = ctk.CTkButton(
                         week_frame, text=str(day), width=35, height=28,
                         fg_color="green" if is_selected else "gray30",
@@ -1026,6 +1028,7 @@ class CustomPopup(ctk.CTkToplevel):
         ctk.CTkButton(self, text=tr["close"], command=self.destroy, fg_color="gray").pack(pady=5)
 
     def open_report(self):
+        """Open the generated report file in the default browser."""
         if os.path.exists(self.report_path):
             os.startfile(self.report_path)
         else:

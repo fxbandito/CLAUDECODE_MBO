@@ -370,8 +370,7 @@ def generate_main_data_ar_report(root_folder: str) -> Tuple[bool, str, str]:
             for method_data in method_weekly_data.values():
                 if week in method_data:
                     profit = method_data[week]["profit"]
-                    if profit > best_profit_this_week:
-                        best_profit_this_week = profit
+                    best_profit_this_week = max(best_profit_this_week, profit)
             perfect_switching_profit.append(best_profit_this_week if best_profit_this_week > float("-inf") else 0)
 
         perfect_cumulative = []

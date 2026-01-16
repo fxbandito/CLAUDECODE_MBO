@@ -263,7 +263,7 @@ def generate_main_data_report(root_folder: str) -> Tuple[bool, str, str]:
         most_common_strategy, most_common_count = strategy_counts.most_common(1)[0]
         consensus_percentage = (most_common_count / total_reports) * 100
 
-        top3_count = sum([c for _, c in strategy_counts.most_common(3)])
+        top3_count = sum(c for _, c in strategy_counts.most_common(3))
         top3_percentage = (top3_count / total_reports) * 100
 
         fig_gauge = go.Figure()

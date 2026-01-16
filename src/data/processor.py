@@ -314,7 +314,7 @@ class DataProcessor:
             try:
                 dates = pd.to_datetime(df["Date"], errors="coerce")
                 summary["date_range"] = f"{dates.min()} - {dates.max()}"
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 summary["date_range"] = "N/A"
         else:
             summary["date_range"] = "N/A"

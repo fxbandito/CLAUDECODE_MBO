@@ -2,6 +2,7 @@
 Sound Manager for MBO Trading Strategy Analyzer v5.
 Handles all audio feedback for UI interactions.
 """
+# pylint: disable=broad-exception-caught
 
 import logging
 import os
@@ -161,32 +162,41 @@ class SoundManager:
         if hasattr(self, "_executor") and self._executor:
             self._executor.shutdown(wait=False)
 
-    # Convenience methods
+    # Convenience methods for common sound effects
     def play_app_start(self):
+        """Play application start sound."""
         self.play("app_start")
 
     def play_app_close(self):
+        """Play application close sound."""
         self.play("app_close")
 
     def play_tab_switch(self):
+        """Play tab switch sound."""
         self.play("tab_switch")
 
     def play_button_click(self):
+        """Play button click sound."""
         self.play("button_click")
 
     def play_toggle_switch(self):
+        """Play toggle switch sound."""
         self.play("toggle_switch")
 
     def play_checkbox_on(self):
+        """Play checkbox checked sound."""
         self.play("checkbox_on")
 
     def play_checkbox_off(self):
+        """Play checkbox unchecked sound."""
         self.play("checkbox_off")
 
     def play_model_start(self):
+        """Play model run start sound."""
         self.play("model_start")
 
     def play_model_complete(self):
+        """Play model run complete sound."""
         self.play("model_complete")
 
 

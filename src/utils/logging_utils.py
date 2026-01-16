@@ -7,6 +7,7 @@ Improvements over v4:
 - Better multiprocess support
 - Simplified configuration
 """
+# pylint: disable=broad-exception-caught,too-many-locals
 
 import logging
 import os

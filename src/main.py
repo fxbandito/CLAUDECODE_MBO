@@ -4,6 +4,9 @@ MBO Trading Strategy Analyzer v5 - Desktop Entry Point
 Main entry point for the application.
 For debug mode with full logging, use main_debug.py instead.
 """
+# pylint: disable=wrong-import-position
+# Note: Import order is intentional - environment variables and warnings must be set
+# before importing customtkinter and application modules.
 
 import multiprocessing
 import os
@@ -59,7 +62,7 @@ def main():
 
     # Ha debug mode, jelezzük az app-nak
     if log_file:
-        app._log(f"Debug mode enabled. Log: {log_file}")
+        app._log(f"Debug mode enabled. Log: {log_file}")  # pylint: disable=protected-access
 
     app.mainloop()
 

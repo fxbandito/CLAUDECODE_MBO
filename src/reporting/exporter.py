@@ -1,8 +1,10 @@
 """Report Exporter for generating analysis reports in various formats."""
 
 # pylint: disable=line-too-long, too-many-lines, import-outside-toplevel
+# pylint: disable=too-many-locals, too-many-statements, use-dict-literal
 # Note: line-too-long disabled because this file contains embedded HTML/CSS templates
 # where line breaks would significantly reduce readability.
+# Note: use-dict-literal disabled because dict() is more readable in Plotly code.
 import logging
 import os
 from datetime import datetime

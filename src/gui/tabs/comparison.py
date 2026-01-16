@@ -3,6 +3,7 @@ Comparison Tab - MBO Trading Strategy Analyzer
 Mixin class for Comparison tab functionality.
 """
 # pylint: disable=too-many-instance-attributes,attribute-defined-outside-init
+# pylint: disable=broad-exception-caught
 
 import os
 from tkinter import TclError, filedialog, messagebox
