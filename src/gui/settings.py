@@ -20,6 +20,12 @@ class SettingsManager:
             "x": None,  # None = center
             "y": None,
         },
+        "auto_window": {
+            "width": 1200,
+            "height": 700,
+            "x": None,
+            "y": None,
+        },
         "paths": {
             "last_folder": "",
             "last_parquet_folder": "",
@@ -28,6 +34,7 @@ class SettingsManager:
             "last_analysis_state_folder": "",
             "last_csv_export_folder": "",
             "last_comparison_folder": "",
+            "last_auto_reports_folder": "",
         },
         "preferences": {
             "language": "EN",
@@ -235,3 +242,28 @@ class SettingsManager:
         if "resources" not in self.settings:
             self.settings["resources"] = {}
         self.settings["resources"]["gpu_enabled"] = enabled
+
+    # === Auto Window Settings ===
+
+    def get_auto_window_geometry(self) -> Dict[str, Optional[int]]:
+        """Get auto execution window geometry (width, height, x, y)."""
+        return self.settings.get("auto_window", self.DEFAULTS["auto_window"])
+
+    def set_auto_window_geometry(self, width: int, height: int, x: int, y: int):
+        """Save auto execution window geometry."""
+        self.settings["auto_window"] = {
+            "width": width,
+            "height": height,
+            "x": x,
+            "y": y,
+        }
+
+    def get_last_auto_reports_folder(self) -> str:
+        """Get last auto reports folder path."""
+        return self.settings.get("paths", {}).get("last_auto_reports_folder", "")
+
+    def set_last_auto_reports_folder(self, path: str):
+        """Save last auto reports folder path."""
+        if "paths" not in self.settings:
+            self.settings["paths"] = {}
+        self.settings["paths"]["last_auto_reports_folder"] = path

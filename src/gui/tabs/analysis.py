@@ -5,11 +5,13 @@ Mixin osztály az Analysis tab funkcionalitásához.
 # pylint: disable=too-many-instance-attributes,attribute-defined-outside-init
 # pylint: disable=too-many-statements,import-outside-toplevel
 
+import logging
 import customtkinter as ctk
 
 from gui.translate import tr
 from analysis.engine import get_resource_manager
 from models import (
+    get_all_models,
     get_categories,
     get_models_in_category,
     get_param_defaults,
@@ -167,16 +169,21 @@ class AnalysisMixin:
         )
         self.btn_stop.pack(side="right", padx=5)
 
-        # Shutdown checkbox
+        # Shutdown checkbox - aktuális model után
         self.var_shutdown = ctk.BooleanVar(value=False)
         self.chk_shutdown = ctk.CTkCheckBox(
             right_controls,
             text="Shutdown",
             variable=self.var_shutdown,
             font=ctk.CTkFont(size=11),
-            text_color="#e74c3c"
+            text_color="#e74c3c",
+            command=self._on_shutdown_checkbox_change
         )
         self.chk_shutdown.pack(side="right", padx=(0, 15))
+
+        # Shutdown állapotok inicializálása
+        self._shutdown_immediate = False  # Aktuális model után
+        self._shutdown_after_all = False  # Teljes queue után (auto)
 
         # === ROW 2: Teljesítmény vezérlők ===
         row2 = ctk.CTkFrame(frame, fg_color="transparent", height=40)
@@ -476,7 +483,24 @@ class AnalysisMixin:
     def _on_auto_click(self):
         """Auto Execution ablak megnyitása."""
         self.sound.play_button_click()
-        self._log("Auto Execution window - coming soon...")
+        self._open_auto_window()
+
+    def _open_auto_window(self):
+        """Auto Execution Window megnyitása vagy előtérbe hozása."""
+        from gui.auto_window import AutoExecutionWindow
+
+        # Ha már létezik az ablak, csak megjelenítjük
+        if hasattr(self, '_auto_window') and self._auto_window is not None:
+            try:
+                if self._auto_window.winfo_exists():
+                    self._auto_window.show()
+                    return
+            except Exception:
+                pass  # Ablak megsemmisült, újat hozunk létre
+
+        # Új ablak létrehozása
+        self._auto_window = AutoExecutionWindow(self)
+        self._log("Auto Execution Manager opened")
 
     def _on_run_analysis(self):
         """Elemzes inditasa."""
@@ -507,6 +531,8 @@ class AnalysisMixin:
         horizon = int(self.horizon_slider.get())
         use_gpu = self.var_gpu.get() if hasattr(self, 'var_gpu') else False
         use_batch = getattr(self, 'var_batch_mode', False)  # Batch mode a gombbol
+        use_panel = self.var_panel_mode.get() if hasattr(self, 'var_panel_mode') else False
+        use_dual = self.var_dual_model.get() if hasattr(self, 'var_dual_model') else False
 
         # Analysis engine letrehozasa
         from analysis.engine import AnalysisEngine, AnalysisContext
@@ -520,7 +546,9 @@ class AnalysisMixin:
             params=params,
             forecast_horizon=horizon,
             use_gpu=use_gpu,
-            use_batch=use_batch
+            use_batch=use_batch,
+            panel_mode=use_panel,
+            dual_model=use_dual
         )
 
         # Log throttling reset
@@ -614,8 +642,25 @@ class AnalysisMixin:
             # Eredmenyek konvertalasa Results tab formatumba
             self._convert_results_to_results_tab(results)
 
+        # Auto mode ellenőrzés - ha auto futás, következő modell
+        if getattr(self, '_is_auto_running', False):
+            self.sound.play_model_complete()
+            # Immediate shutdown ellenőrzés auto módban is
+            if getattr(self, '_shutdown_immediate', False):
+                self._log("Immediate shutdown requested - stopping auto execution", "critical")
+                self._is_auto_running = False
+                self._finish_auto_sequence()
+                self._execute_shutdown()
+                return
+            self._on_auto_model_complete()
+            return  # Ne állítsuk vissza a UI-t, mert folytatódik
+
         self._reset_analysis_ui()
         self.sound.play_model_complete()
+
+        # Immediate shutdown ellenőrzés normál módban
+        if getattr(self, '_shutdown_immediate', False):
+            self._execute_shutdown()
 
     def _convert_results_to_results_tab(self, results):
         """
@@ -903,6 +948,12 @@ class AnalysisMixin:
     def _on_stop_analysis(self):
         """Elemzés leállítása."""
         self.sound.play_button_click()
+
+        # Auto mode leállítása
+        if getattr(self, '_is_auto_running', False):
+            self.stop_auto_execution()
+            return
+
         self._log("Stopping analysis...")
 
         # Engine leallitasa
@@ -1020,13 +1071,17 @@ class AnalysisMixin:
         self.sound.play_button_click()
         popup = ctk.CTkToplevel(self)
         popup.title("Panel Mode - Help")
-        popup.geometry("500x300")
+        popup.geometry("500x350")
         popup.transient(self)
         popup.grab_set()
 
+        # Dinamikusan lekérjük a Panel módot támogató modelleket
+        panel_models = [m for m in get_all_models() if supports_panel_mode(m)]
+        model_list = "\n".join(f"- {m}" for m in panel_models) if panel_models else "- None"
+
         text = ctk.CTkTextbox(popup, font=ctk.CTkFont(size=12))
         text.pack(fill="both", expand=True, padx=15, pady=15)
-        text.insert("1.0", """PANEL MODE
+        text.insert("1.0", f"""PANEL MODE
 
 Panel mode trains a SINGLE model on ALL strategies at once,
 instead of training separate models for each strategy.
@@ -1037,11 +1092,7 @@ Benefits:
 - Works well when strategies are similar
 
 Supported models:
-- Random Forest
-- XGBoost
-- LightGBM
-- Gradient Boosting
-- KNN Regressor
+{model_list}
 
 Note: Panel and Dual modes are mutually exclusive.""")
         text.configure(state="disabled")
@@ -1053,13 +1104,17 @@ Note: Panel and Dual modes are mutually exclusive.""")
         self.sound.play_button_click()
         popup = ctk.CTkToplevel(self)
         popup.title("Dual Model - Help")
-        popup.geometry("500x350")
+        popup.geometry("500x400")
         popup.transient(self)
         popup.grab_set()
 
+        # Dinamikusan lekérjük a Dual módot támogató modelleket
+        dual_models = [m for m in get_all_models() if supports_dual_mode(m)]
+        model_list = "\n".join(f"- {m}" for m in dual_models) if dual_models else "- None"
+
         text = ctk.CTkTextbox(popup, font=ctk.CTkFont(size=12))
         text.pack(fill="both", expand=True, padx=15, pady=15)
-        text.insert("1.0", """DUAL MODEL MODE
+        text.insert("1.0", f"""DUAL MODEL MODE
 
 Dual model trains TWO separate models:
 1. Activity Model - Predicts trading activity (classification)
@@ -1073,13 +1128,328 @@ Benefits:
 - More detailed analysis
 
 Supported models:
-- Random Forest
-- XGBoost
-- LightGBM
-- Gradient Boosting
-- KNN Regressor
+{model_list}
 
 Note: Panel and Dual modes are mutually exclusive.""")
         text.configure(state="disabled")
 
         ctk.CTkButton(popup, text="Close", command=popup.destroy).pack(pady=10)
+
+    # === AUTO EXECUTION METHODS ===
+
+    def run_auto_sequence(self, execution_list: list, shutdown_after_all: bool = False):
+        """
+        Auto execution sequence indítása.
+
+        Args:
+            execution_list: Futtatandó modellek listája
+            shutdown_after_all: Shutdown a teljes queue után (deprecated - use checkbox)
+        """
+        if not execution_list:
+            self._log("Auto execution: Empty queue!", "warning")
+            return
+
+        if self.processed_data is None or self.processed_data.empty:
+            self._log("Auto execution: No data loaded!", "warning")
+            return
+
+        # Ha a paraméterben True, akkor azt használjuk (backward compatibility)
+        # Egyébként az internal state-et (_shutdown_after_all) a checkbox már beállította
+        if shutdown_after_all:
+            self._shutdown_after_all = True
+
+        self._log(f"Starting Auto Execution: {len(execution_list)} models in queue...")
+
+        # Auto execution állapot inicializálás
+        self._auto_execution_list = list(execution_list)  # Másolat
+        self._auto_current_index = 0
+        self._is_auto_running = True
+
+        # UI állapot
+        self.btn_run.configure(state="disabled")
+        self.btn_auto.configure(state="normal")  # Auto gomb marad aktív
+        self.btn_stop.configure(state="normal")
+        self.btn_pause.configure(state="normal")
+
+        # Első modell indítása
+        self._run_next_auto_model()
+
+    def _run_next_auto_model(self):
+        """Következő modell futtatása az auto queue-ból."""
+        if not getattr(self, '_is_auto_running', False):
+            return
+
+        # GC cleanup a modellek között - memória felszabadítás
+        self._auto_cleanup()
+
+        # Ellenőrzés: van-e még futtatandó modell
+        if self._auto_current_index >= len(self._auto_execution_list):
+            self._finish_auto_sequence()
+            return
+
+        item = self._auto_execution_list[self._auto_current_index]
+        total = len(self._auto_execution_list)
+
+        data_mode = item.get("data_mode", "Original")
+        self._log(
+            f"Auto Run [{self._auto_current_index + 1}/{total}]: "
+            f"{item['model']} ({item['category']}) [Mode: {data_mode}]"
+        )
+
+        # Data mode váltás kezelése
+        current_mode = self.feature_var.get() if hasattr(self, 'feature_var') else "Original"
+
+        if data_mode != current_mode:
+            self._log(f"Switching data mode from '{current_mode}' to '{data_mode}'...")
+            # Feature mode váltás és újraszámítás
+            if hasattr(self, 'feature_var'):
+                self.feature_var.set(data_mode)
+
+            # Async recalculation - majd _continue_auto_run hívódik
+            self._auto_pending_item = item
+            self._trigger_auto_feature_recalc(data_mode)
+        else:
+            # Nincs mode váltás, folytatás közvetlenül
+            self._continue_auto_run(item)
+
+    def _trigger_auto_feature_recalc(self, data_mode: str):
+        """Feature újraszámítás indítása auto futtatáshoz."""
+        import threading
+
+        def recalc_thread():
+            try:
+                # A _recalculate_features metódus a data_loading mixin-ben van
+                if hasattr(self, '_recalculate_features'):
+                    self._recalculate_features()
+                # Sikeres - folytatás a fő szálon
+                self.after(0, lambda: self._continue_auto_run(self._auto_pending_item))
+            except Exception as e:
+                logging.error(f"Auto feature recalc error: {e}")
+                # Hiba esetén is folytatjuk
+                self.after(0, lambda: self._continue_auto_run(self._auto_pending_item))
+
+        threading.Thread(target=recalc_thread, daemon=True).start()
+
+    def _continue_auto_run(self, item: dict):
+        """Auto futtatás folytatása a feature recalc után."""
+        if not getattr(self, '_is_auto_running', False):
+            return
+
+        # UI beállítása az item alapján
+        self._apply_auto_item_settings(item)
+
+        # Futtatás indítása
+        self._run_analysis_with_item(item)
+
+    def _apply_auto_item_settings(self, item: dict):
+        """Auto queue item beállításainak alkalmazása a UI-ra."""
+        # Category és Model beállítása
+        self.category_var.set(item["category"])
+        self._on_category_change(item["category"])
+        self.model_var.set(item["model"])
+        self._on_model_change(item["model"])
+
+        # Paraméterek beállítása
+        for key, value in item.get("params", {}).items():
+            if key in self.param_widgets:
+                widget = self.param_widgets[key]
+                if hasattr(widget, 'set'):
+                    widget.set(str(value))
+                elif hasattr(widget, 'delete') and hasattr(widget, 'insert'):
+                    widget.delete(0, 'end')
+                    widget.insert(0, str(value))
+
+        # Horizon
+        if "horizon" in item:
+            self.horizon_slider.set(item["horizon"])
+            self.horizon_label.configure(text=str(item["horizon"]))
+
+        # GPU
+        if hasattr(self, 'var_gpu'):
+            self.var_gpu.set(item.get("use_gpu", False))
+
+        # Batch mode
+        self.var_batch_mode = item.get("batch_mode", False)
+        if self.var_batch_mode:
+            self.btn_batch_mode.configure(fg_color="#27ae60", text="BATCH: ON")
+        else:
+            self.btn_batch_mode.configure(fg_color="#5d5d5d", text="BATCH MODE")
+
+        # Panel mode
+        if hasattr(self, 'var_panel_mode'):
+            self.var_panel_mode.set(item.get("panel_mode", False))
+
+        # Dual mode
+        if hasattr(self, 'var_dual_model'):
+            self.var_dual_model.set(item.get("dual_model", False))
+
+    def _run_analysis_with_item(self, item: dict):
+        """Elemzés futtatása egy auto queue item alapján."""
+        from analysis.engine import AnalysisEngine, AnalysisContext
+        import threading
+
+        model_name = item["model"]
+        params = item.get("params", {})
+        horizon = item.get("horizon", 52)
+        use_gpu = item.get("use_gpu", False)
+        use_batch = item.get("batch_mode", False)
+        use_panel = item.get("panel_mode", False)
+        use_dual = item.get("dual_model", False)
+
+        # Store output folder for report generation
+        self._auto_current_output_folder = item.get("output_folder", "")
+
+        self._analysis_engine = AnalysisEngine()
+        self._analysis_engine.set_progress_callback(self._on_analysis_progress)
+
+        context = AnalysisContext(
+            model_name=model_name,
+            params=params,
+            forecast_horizon=horizon,
+            use_gpu=use_gpu,
+            use_batch=use_batch,
+            panel_mode=use_panel,
+            dual_model=use_dual
+        )
+
+        self._last_logged_percent = -10
+        self._analysis_start_time = __import__('time').time()
+
+        self._analysis_thread = threading.Thread(
+            target=self._run_analysis_thread,
+            args=(context,),
+            daemon=True
+        )
+        self._analysis_thread.start()
+        self._start_time_timer()
+
+    def _finish_auto_sequence(self):
+        """Auto execution sequence befejezése."""
+        self._log("Auto Execution Complete!")
+
+        self._is_auto_running = False
+        self._auto_execution_list = []
+        self._auto_current_index = 0
+
+        # UI visszaállítása
+        self.btn_run.configure(state="normal")
+        self.btn_stop.configure(state="disabled")
+        self.btn_pause.configure(state="disabled")
+
+        # Auto window frissítése
+        if hasattr(self, '_auto_window') and self._auto_window:
+            try:
+                if self._auto_window.winfo_exists():
+                    self._auto_window.update_start_button_state()
+                    self._auto_window.progress_bar.set(0)  # Reset progress
+            except Exception:
+                pass
+
+        self.sound.play_model_complete()
+
+        # Shutdown kezelés - after all
+        if getattr(self, '_shutdown_after_all', False):
+            self._execute_shutdown()
+
+    def _on_auto_model_complete(self):
+        """Egy auto modell befejezése után - következő indítása."""
+        if not getattr(self, '_is_auto_running', False):
+            return
+
+        self._auto_current_index += 1
+
+        # Progress frissítése az auto window-ban
+        if hasattr(self, '_auto_window') and self._auto_window:
+            try:
+                if self._auto_window.winfo_exists():
+                    progress = self._auto_current_index / len(self._auto_execution_list)
+                    self._auto_window.progress_bar.set(progress)
+            except Exception:
+                pass
+
+        # Kis késleltetés a következő modell előtt (GC, stb.)
+        self.after(500, self._run_next_auto_model)
+
+    def stop_auto_execution(self):
+        """Auto execution leállítása."""
+        if getattr(self, '_is_auto_running', False):
+            self._log("Auto execution stopped by user.", "warning")
+            self._is_auto_running = False
+
+            # Aktuális elemzés leállítása
+            if hasattr(self, '_analysis_engine') and self._analysis_engine:
+                self._analysis_engine.cancel()
+
+            self._finish_auto_sequence()
+
+    def _auto_cleanup(self):
+        """Memória tisztítás auto futtatások között."""
+        import gc
+        from analysis.engine import AnalysisEngine
+
+        try:
+            # Engine shutdown - worker processek leállítása
+            AnalysisEngine.shutdown()
+
+            # GC futtatás többször a ciklikus referenciák miatt
+            gc.collect()
+            gc.collect()
+
+            logging.debug("Auto Exec: Cleanup performed between model runs")
+        except Exception as e:
+            logging.debug(f"Auto Exec: Cleanup warning: {e}")
+
+    # === SHUTDOWN METHODS ===
+
+    def _on_shutdown_checkbox_change(self):
+        """Analysis tab shutdown checkbox változás - immediate shutdown."""
+        if self.var_shutdown.get():
+            # Bekapcsolva: immediate shutdown, auto window kikapcsolása
+            self._shutdown_immediate = True
+            self._shutdown_after_all = False
+            self._sync_auto_window_shutdown(False)
+            self._log("Shutdown enabled: after current model", "warning")
+        else:
+            # Kikapcsolva
+            self._shutdown_immediate = False
+            self._log("Shutdown disabled")
+
+    def set_shutdown_after_all(self, enabled: bool):
+        """Auto window hívja - shutdown after all beállítása."""
+        if enabled:
+            # Bekapcsolva: after all, analysis tab kikapcsolása
+            self._shutdown_after_all = True
+            self._shutdown_immediate = False
+            self.var_shutdown.set(False)
+            self._log("Shutdown enabled: after ALL models", "warning")
+        else:
+            # Kikapcsolva
+            self._shutdown_after_all = False
+
+    def _sync_auto_window_shutdown(self, enabled: bool):
+        """Auto window shutdown checkbox szinkronizálása."""
+        if hasattr(self, '_auto_window') and self._auto_window:
+            try:
+                if self._auto_window.winfo_exists():
+                    self._auto_window.var_shutdown.set(enabled)
+            except Exception:
+                pass
+
+    def _execute_shutdown(self):
+        """Számítógép leállítása."""
+        import subprocess
+        import sys
+
+        self._log("SHUTDOWN: Initiating system shutdown...", "critical")
+
+        try:
+            if sys.platform == "win32":
+                # Windows shutdown - 60 másodperc késleltetéssel
+                subprocess.run(["shutdown", "/s", "/t", "60"], check=True)
+                self._log("SHUTDOWN: System will shut down in 60 seconds", "critical")
+            else:
+                # Linux/Mac
+                subprocess.run(["shutdown", "-h", "+1"], check=True)
+                self._log("SHUTDOWN: System will shut down in 1 minute", "critical")
+        except Exception as e:
+            self._log(f"SHUTDOWN ERROR: {e}", "error")

@@ -1,3 +1,14 @@
+v5.5.0 Stable
+- Auto Execution Manager implementáció (AutoExecutionWindow)
+- Queue-based automatic model execution with persistence (auto.txt)
+- Model selection: Category/Model/Parameters dynamically loaded
+- Data Mode support (Original, Forward Calc, Rolling Window) with auto-recalculation
+- Shutdown synchronization between Analysis tab and Auto window
+- Panel Mode and Dual Model support in auto execution
+- GC cleanup between model runs
+- Window geometry persistence for Auto window
+- Dynamic model lists (no hardcoded model names)
+
 v5.4.8 Stable
 - ARIMA model implementáció (statsmodels alapú, trend auto-korrekció)
 - GUI Batch Mode toggle gomb (alapértelmezett: KI, zöld ha aktív)

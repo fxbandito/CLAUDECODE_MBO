@@ -425,6 +425,8 @@ class AnalysisContext:
     forecast_horizon: int = 12
     use_gpu: bool = False
     use_batch: bool = False
+    panel_mode: bool = False
+    dual_model: bool = False
 
 
 @dataclass
