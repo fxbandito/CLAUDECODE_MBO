@@ -302,8 +302,10 @@ def configure_debug_logging(log_dir_base: str = "Log", filename_prefix: str = "m
         return None
 
     try:
-        # Create log directory
-        log_dir = os.path.join(os.getcwd(), log_dir_base)
+        # Create log directory in main project directory (ClaudeCode/Log)
+        # Path: logging_utils.py -> utils/ -> src/ -> ClaudeCode/
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        log_dir = os.path.join(project_root, log_dir_base)
         os.makedirs(log_dir, exist_ok=True)
 
         # Generate filename with timestamp

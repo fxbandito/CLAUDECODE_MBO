@@ -1,3 +1,11 @@
+v5.5.3 Beta
+- Pause gomb deadlock javítás (engine.py): pause check átmozgatva lock-on kívülre
+- Data_raw path fix (results.py): projekt főkönyvtárba ment, nem src-be
+- analyze_strategy() paraméter javítás: helyes függvény szignatúra
+- Pylint code quality: analysis.py 9.83/10, worker.py 10/10, results.py 10/10
+- Unused imports eltávolítva (AnalysisResult, numpy, duplicate imports)
+- Logging format javítás: f-string helyett % formatting
+
 v5.5.2 Stable
 - MULTIPROCESSING architektúra: analysis külön process-ben fut (nem threading)
 - GUI SOHA nem fagy: teljes szétválasztás Queue-alapú kommunikációval

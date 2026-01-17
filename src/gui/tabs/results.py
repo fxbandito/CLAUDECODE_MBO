@@ -736,15 +736,23 @@ class ResultsMixin:
 
             params = context_data.get("params", {})
             method = context_data.get("method", "ARIMA")
-            use_gpu = params.get("use_gpu", False)
             max_horizon = params.get("forecast_horizon", 52)
+
+            # Extract time series data from DataFrame
+            if isinstance(strat_data, pd.DataFrame) and "Profit" in strat_data.columns:
+                ts_values = strat_data["Profit"].dropna().tolist()
+            else:
+                logging.error("Cannot extract Profit column from strategy data")
+                return None, None
 
             # Lazy import to avoid circular dependency
             from analysis.engine import analyze_strategy  # pylint: disable=import-outside-toplevel
 
             forecasts = analyze_strategy(
-                strat_id, strat_data, method, params,
-                use_gpu=use_gpu, max_horizon=max_horizon, n_jobs=1
+                data=ts_values,
+                model_name=method,
+                steps=max_horizon,
+                params=params
             )
 
             if forecasts is not None:
@@ -957,9 +965,13 @@ class ResultsMixin:
 
         initial_dir = getattr(self, "last_analysis_state_folder", "")
         if not initial_dir or not os.path.exists(initial_dir):
-            initial_dir = os.path.join(os.getcwd(), "Data_raw")
+            # Data_raw a projekt főkönyvtárban (ClaudeCode/)
+            # Path: results.py -> tabs/ -> gui/ -> src/ -> ClaudeCode/
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__)))))
+            initial_dir = os.path.join(project_root, "Data_raw")
             if not os.path.exists(initial_dir):
-                initial_dir = os.getcwd()
+                initial_dir = project_root
 
         file_path = filedialog.askopenfilename(
             initialdir=initial_dir,

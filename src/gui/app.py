@@ -607,6 +607,19 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ComparisonMixin, Ins
 
     # === LOG ===
 
+    def log_message(self, message: str, level: str = "info") -> None:
+        """
+        Public interface for logging messages.
+
+        This is the preferred method for external code to log messages.
+        Internally calls _log() for actual logging.
+
+        Args:
+            message: The message to log
+            level: Log level - "info", "debug", "warning", "error", "success", "highlight"
+        """
+        self._log(message, level)
+
     def _log(self, message: str, level: str = "info"):
         """
         Kétszintű log rendszer intelligens szín-detektálással:

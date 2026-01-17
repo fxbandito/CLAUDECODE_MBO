@@ -20,13 +20,13 @@ Architecture:
 import gc
 import logging
 import os
+import threading
 import time
 import traceback
 from dataclasses import dataclass
 from multiprocessing import Process, Queue
 from typing import Any, Dict, List, Optional
 
-import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ def _convert_params(params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def analysis_worker(
-    data_dict: Dict[str, Any],
+    data: pd.DataFrame,
     context_dict: Dict[str, Any],
     env_vars: Dict[str, str],
     progress_queue: Queue,
@@ -111,7 +111,7 @@ def analysis_worker(
     Worker function running in separate process.
 
     Args:
-        data_dict: Serialized DataFrame data (to_dict format)
+        data: DataFrame to analyze (directly pickled, no conversion needed)
         context_dict: Analysis context as dict
         env_vars: Environment variables to set
         progress_queue: Queue to send progress updates
@@ -124,8 +124,7 @@ def analysis_worker(
         # Setup environment
         _setup_worker_env(env_vars)
 
-        # Reconstruct DataFrame
-        data = pd.DataFrame(data_dict)
+        # DataFrame is received directly (pickle handles serialization efficiently)
 
         # Import here to avoid import issues in main process
         from models import get_model_class, get_param_defaults
@@ -353,6 +352,7 @@ class AnalysisWorkerManager:
     Manager for the analysis worker process.
 
     Handles starting, stopping, and communicating with the worker process.
+    Uses background thread for process startup to keep GUI responsive.
 
     Usage:
         manager = AnalysisWorkerManager()
@@ -372,13 +372,22 @@ class AnalysisWorkerManager:
         self._result_queue: Optional[Queue] = None
         self._cancel_queue: Optional[Queue] = None
         self._is_running = False
+        self._is_starting = False  # New: jelzi, hogy az indítás folyamatban
+        self._startup_thread: Optional[threading.Thread] = None
 
     @property
     def is_running(self) -> bool:
-        """Check if worker is running."""
+        """Check if worker is running or starting."""
+        if self._is_starting:
+            return True  # Still starting up
         if self._process is None:
             return False
         return self._process.is_alive()
+
+    @property
+    def is_starting(self) -> bool:
+        """Check if worker is in startup phase."""
+        return self._is_starting
 
     def start(
         self,
@@ -387,7 +396,11 @@ class AnalysisWorkerManager:
         env_vars: Dict[str, str]
     ):
         """
-        Start the worker process.
+        Start the worker process ASYNCHRONOUSLY.
+
+        The actual process startup happens in a background thread to prevent
+        GUI freezing during DataFrame serialization (which can be slow for
+        large datasets).
 
         Args:
             data: DataFrame to analyze
@@ -398,31 +411,84 @@ class AnalysisWorkerManager:
             logger.warning("Worker already running, stopping first...")
             self.stop()
 
-        # Create queues
+        # Create queues immediately (fast)
         self._progress_queue = Queue()
         self._result_queue = Queue()
         self._cancel_queue = Queue()
 
-        # Convert DataFrame to dict for pickling
-        data_dict = data.to_dict()
+        # Mark as starting
+        self._is_starting = True
+        self._is_running = False
 
-        # Create and start process
-        self._process = Process(
-            target=analysis_worker,
-            args=(
-                data_dict,
-                context_dict,
-                env_vars,
-                self._progress_queue,
-                self._result_queue,
-                self._cancel_queue
-            ),
+        # Send initial "starting" progress
+        self._progress_queue.put(WorkerProgress(
+            total_strategies=0,
+            completed_strategies=0,
+            current_strategy="Starting...",
+            is_running=True
+        ))
+
+        # Start process in background thread (keeps GUI responsive)
+        # FONTOS: NEM hívunk data.copy()-t itt, mert az blokkolná a GUI-t!
+        # A háttérszál kapja az eredeti referenciát és ő csinálja a copy-t
+        self._startup_thread = threading.Thread(
+            target=self._start_process_background,
+            args=(data, context_dict, env_vars),
             daemon=True
         )
-        self._process.start()
-        self._is_running = True
+        self._startup_thread.start()
 
-        logger.info("Worker process started (PID: %d)", self._process.pid)
+        logger.info("Worker startup initiated (background thread)")
+
+    def _start_process_background(
+        self,
+        data: pd.DataFrame,
+        context_dict: Dict[str, Any],
+        env_vars: Dict[str, str]
+    ):
+        """
+        Background thread that starts the actual process.
+
+        Passes DataFrame directly to subprocess - pandas handles pickling
+        efficiently in C code, releasing GIL and minimizing GUI blocking.
+        """
+        try:
+            # Make a copy of the data to avoid race conditions with GUI
+            # This is faster than to_dict() and the pickle is done in C (releases GIL)
+            data_copy = data.copy()
+
+            # Create and start process - pickle serialization happens here
+            # but mostly in C code, so it releases the GIL for GUI responsiveness
+            self._process = Process(
+                target=analysis_worker,
+                args=(
+                    data_copy,
+                    context_dict,
+                    env_vars,
+                    self._progress_queue,
+                    self._result_queue,
+                    self._cancel_queue
+                ),
+                daemon=True
+            )
+            self._process.start()
+            self._is_running = True
+            self._is_starting = False
+
+            logger.info("Worker process started (PID: %d)", self._process.pid)
+
+        except Exception as e:
+            logger.error("Failed to start worker process: %s", e)
+            self._is_starting = False
+            self._is_running = False
+            # Send error result
+            if self._result_queue:
+                self._result_queue.put(WorkerResult(
+                    success=False,
+                    results={},
+                    elapsed_seconds=0,
+                    error=f"Failed to start worker: {e}"
+                ))
 
     def get_progress(self) -> Optional[WorkerProgress]:
         """
@@ -468,9 +534,20 @@ class AnalysisWorkerManager:
                 pass
 
     def stop(self):
-        """Stop the worker process."""
+        """Stop the worker process and cleanup."""
+        # Mark as not running/starting
+        self._is_starting = False
+        self._is_running = False
+
+        # Send cancel signal
         self.cancel()
 
+        # Wait for startup thread to finish (if running)
+        if self._startup_thread is not None and self._startup_thread.is_alive():
+            self._startup_thread.join(timeout=2)
+        self._startup_thread = None
+
+        # Terminate process
         if self._process is not None and self._process.is_alive():
             self._process.terminate()
             self._process.join(timeout=2)
@@ -481,7 +558,6 @@ class AnalysisWorkerManager:
 
         self._cleanup_queues()
         self._process = None
-        self._is_running = False
 
     def _cleanup_queues(self):
         """Clean up queue resources."""

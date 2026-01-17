@@ -684,15 +684,16 @@ class AnalysisEngine:
         total = len(strategies)
 
         for i, (strategy_id, values) in enumerate(strategies.items()):
-            # Cancel/pause flag ellenőrzés
+            # Cancel ellenőrzés (lock-kal)
             with self._lock:
                 if self._progress.is_cancelled:
                     break
-
-                while self._progress.is_paused and not self._progress.is_cancelled:
-                    time.sleep(0.1)  # Várakozás pause alatt
-
                 self._progress.current_strategy = strategy_id
+
+            # Pause ellenőrzés (lock NÉLKÜL - különben deadlock!)
+            # A pause flag-et a GUI szál állítja, a lock nélküli olvasás biztonságos
+            while self._progress.is_paused and not self._progress.is_cancelled:
+                time.sleep(0.1)  # Várakozás pause alatt
 
             # Forecast futtatása
             start = time.perf_counter()
