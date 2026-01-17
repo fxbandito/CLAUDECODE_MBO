@@ -1,6 +1,11 @@
 """
 Analysis Tab - MBO Trading Strategy Analyzer
 Mixin osztály az Analysis tab funkcionalitásához.
+
+Multiprocessing architecture for GUI responsiveness:
+- Analysis runs in separate process (worker.py)
+- GUI polls results via Queue (no GIL blocking)
+- Complete separation of computation and display
 """
 # pylint: disable=too-many-instance-attributes,attribute-defined-outside-init
 # pylint: disable=too-many-statements,import-outside-toplevel
@@ -10,6 +15,7 @@ import customtkinter as ctk
 
 from gui.translate import tr
 from analysis.engine import get_resource_manager
+from analysis.worker import AnalysisWorkerManager, WorkerProgress, WorkerResult
 from models import (
     get_all_models,
     get_categories,
@@ -503,7 +509,7 @@ class AnalysisMixin:
         self._log("Auto Execution Manager opened")
 
     def _on_run_analysis(self):
-        """Elemzes inditasa."""
+        """Elemzes inditasa - MULTIPROCESSING alapú implementáció."""
         self.sound.play_button_click()
 
         if self.processed_data is None or self.processed_data.empty:
@@ -519,12 +525,12 @@ class AnalysisMixin:
 
         # Batch mode allapot log
         batch_status = "BATCH MODE" if getattr(self, 'var_batch_mode', False) else "Single Mode"
-        self._log(f"Starting analysis with {model_name} ({batch_status})...")
+        self._log(f"Starting analysis with {model_name} ({batch_status})...", "success")
 
         # UI allapot frissitese
         self.btn_run.configure(state="disabled")
         self.btn_stop.configure(state="normal")
-        self.btn_pause.configure(state="normal")
+        self.btn_pause.configure(state="disabled")  # Pause nem támogatott multiprocessing módban
 
         # Parameterek osszegyujtese
         params = self._collect_params()
@@ -534,37 +540,41 @@ class AnalysisMixin:
         use_panel = self.var_panel_mode.get() if hasattr(self, 'var_panel_mode') else False
         use_dual = self.var_dual_model.get() if hasattr(self, 'var_dual_model') else False
 
-        # Analysis engine letrehozasa
-        from analysis.engine import AnalysisEngine, AnalysisContext
-        import threading
+        # Context dict a worker számára (pickle-elhető)
+        context_dict = {
+            'model_name': model_name,
+            'params': params,
+            'forecast_horizon': horizon,
+            'use_gpu': use_gpu,
+            'use_batch': use_batch,
+            'panel_mode': use_panel,
+            'dual_model': use_dual
+        }
 
-        self._analysis_engine = AnalysisEngine()
-        self._analysis_engine.set_progress_callback(self._on_analysis_progress)
-
-        context = AnalysisContext(
-            model_name=model_name,
-            params=params,
-            forecast_horizon=horizon,
-            use_gpu=use_gpu,
-            use_batch=use_batch,
-            panel_mode=use_panel,
-            dual_model=use_dual
-        )
+        # Environment variables a worker számára
+        res_mgr = get_resource_manager()
+        env_vars = res_mgr.get_env_vars()
 
         # Log throttling reset
         self._last_logged_percent = -10
+        self._analysis_running = True
 
-        # Hatterszalon inditasa
+        # Worker manager létrehozása és indítása
+        if not hasattr(self, '_worker_manager') or self._worker_manager is None:
+            self._worker_manager = AnalysisWorkerManager()
+
+        # Data másolat a worker-nek
+        with self.data_lock:
+            data_copy = self.processed_data.copy()
+
         self._analysis_start_time = __import__('time').time()
-        self._analysis_thread = threading.Thread(
-            target=self._run_analysis_thread,
-            args=(context,),
-            daemon=True
-        )
-        self._analysis_thread.start()
+        self._worker_manager.start(data_copy, context_dict, env_vars)
 
         # Timer inditasa az idokijelzeshez
         self._start_time_timer()
+
+        # GUI progress poller indítása (poll-olja a Queue-t)
+        self._start_progress_poller()
 
     def _collect_params(self) -> dict:
         """Osszegyujti a parametereket a GUI-bol."""
@@ -574,82 +584,105 @@ class AnalysisMixin:
                 params[param_name] = widget.get()
         return params
 
-    def _run_analysis_thread(self, context):
-        """Hatterszalon az elemzeshez."""
-        try:
-            with self.data_lock:
-                data = self.processed_data.copy() if self.processed_data is not None else None
+    def _start_progress_poller(self):
+        """GUI progress poller indítása - ez fut a fő szálon, periodikusan."""
+        self._progress_poller_running = True
+        self._poll_progress()
 
-            if data is None:
-                self._log("No data available!", "error")
-                return
+    def _stop_progress_poller(self):
+        """GUI progress poller leállítása."""
+        self._progress_poller_running = False
 
-            results = self._analysis_engine.run(data, context)
+    def _poll_progress(self):
+        """
+        Progress lekérdezése a worker Queue-ból - FŐ SZÁLON fut periodikusan.
 
-            # Eredmenyek feldolgozasa a fo szalon
-            self.after(0, lambda: self._on_analysis_complete(results))
-
-        except Exception as e:
-            self._log(f"Analysis error: {e}", "error")
-            import traceback
-            traceback.print_exc()
-            self.after(0, self._reset_analysis_ui)
-
-    def _on_analysis_progress(self, progress):
-        """Progress callback - fo szalra atadashoz (optimalizált)."""
-        # A progress callback mas szalrol jon - taroljuk a legfrissebb erteket
-        # és hagyjuk a GUI-t a saját ütemezésben frissíteni
-        import time
-        current_time = time.time() * 1000
-        last_update = getattr(self, '_last_progress_update_time', 0)
-
-        # Tárolás mindig (hogy a legfrissebb érték legyen elérhető)
-        self._latest_progress = progress
-
-        # Throttling: maximum 4 frissítés másodpercenként (250ms)
-        if current_time - last_update < 250:
+        MULTIPROCESSING ARCHITEKTÚRA:
+        - A worker process külön fut, teljesen független a GUI-tól
+        - A progress a Queue-n keresztül érkezik (nem blocking)
+        - A GUI szál SOHA nem vár a worker-re
+        """
+        if not getattr(self, '_progress_poller_running', False):
             return
 
-        self._last_progress_update_time = current_time
+        worker = getattr(self, '_worker_manager', None)
+        if worker is None:
+            return
 
-        # Ha nincs aktív GUI frissítés ütemezve, ütemezzünk egyet
-        if not getattr(self, '_progress_update_scheduled', False):
-            self._progress_update_scheduled = True
+        # 1. Ellenőrizzük, van-e result (befejezés)
+        result = worker.get_result()
+        if result is not None:
+            self._on_worker_complete(result)
+            return
+
+        # 2. Progress lekérdezése (non-blocking)
+        progress = worker.get_progress()
+
+        if progress is not None and progress.total_strategies > 0:
+            pct = progress.completed_strategies / progress.total_strategies
+
+            # Progress bar frissítése (0.0 - 1.0)
+            self.set_progress(pct)
+
+            # Log CSAK 10%-onként
+            pct_int = int(pct * 100)
+            if not hasattr(self, '_last_logged_percent'):
+                self._last_logged_percent = -10
+
+            if pct_int >= self._last_logged_percent + 10:
+                self._last_logged_percent = pct_int
+                self._log(
+                    f"Progress: {progress.completed_strategies}/{progress.total_strategies} "
+                    f"({pct_int}%)",
+                    "success"
+                )
+
+        # 3. Ellenőrizzük, fut-e még a worker
+        if not worker.is_running and getattr(self, '_analysis_running', False):
+            # Worker leállt result nélkül - hiba
+            self._log("Worker process terminated unexpectedly", "error")
+            self._reset_analysis_ui()
+            return
+
+        # 4. Következő poll ütemezése (250ms interval)
+        if getattr(self, '_analysis_running', False):
             try:
-                self.after(50, self._do_progress_update)  # 50ms késleltetés
+                self.after(250, self._poll_progress)
             except Exception:
-                self._progress_update_scheduled = False
+                pass  # GUI már bezáródhatott
 
-    def _do_progress_update(self):
-        """Tényleges progress frissítés a fő szálon (debounced)."""
-        self._progress_update_scheduled = False
-        progress = getattr(self, '_latest_progress', None)
+    def _on_worker_complete(self, result: WorkerResult):
+        """Worker befejezésekor hívódik - eredmények feldolgozása."""
+        from analysis.engine import AnalysisResult
 
-        if progress is None or progress.total_strategies <= 0:
+        self._stop_time_timer()
+        self._stop_progress_poller()
+        self._analysis_running = False
+
+        if not result.success:
+            self._log(f"Analysis error: {result.error}", "error")
+            self._reset_analysis_ui()
             return
 
-        pct = progress.completed_strategies / progress.total_strategies
-
-        # Progress bar frissítése (0.0 - 1.0)
-        self.set_progress(pct)
-
-        # Debug log CSAK 10%-onként (ne terheljük a log rendszert)
-        pct_int = int(pct * 100)
-        if not hasattr(self, '_last_logged_percent'):
-            self._last_logged_percent = -10
-
-        # Log csak ha legalább 10%-ot léptünk vagy befejeződött
-        if pct_int >= self._last_logged_percent + 10 or pct >= 1.0:
-            self._last_logged_percent = pct_int
-            self._log(
-                f"Progress: {progress.completed_strategies}/{progress.total_strategies} "
-                f"({pct_int}%)",
-                "debug"
+        # Konvertálás AnalysisResult formátumba (kompatibilitás)
+        results = {}
+        for strategy_id, data in result.results.items():
+            results[strategy_id] = AnalysisResult(
+                strategy_id=strategy_id,
+                forecasts=data['forecasts'],
+                elapsed_ms=data['elapsed_ms'],
+                success=data['success'],
+                error=data.get('error')
             )
+
+        # Eredmények feldolgozása (ugyanaz mint korábban)
+        self._on_analysis_complete(results)
 
     def _on_analysis_complete(self, results):
         """Elemzes befejezese."""
         self._stop_time_timer()
+        self._stop_progress_poller()
+        self._analysis_running = False
 
         success_count = sum(1 for r in results.values() if r.success)
         total_count = len(results)
@@ -861,6 +894,10 @@ class AnalysisMixin:
 
     def _reset_analysis_ui(self):
         """UI visszaallitasa elemzes utan."""
+        # Progress poller leállítása
+        self._stop_progress_poller()
+        self._analysis_running = False
+
         self.btn_run.configure(state="normal")
         self.btn_stop.configure(state="disabled")
         self.btn_pause.configure(state="disabled")
@@ -888,6 +925,12 @@ class AnalysisMixin:
         minutes = int((elapsed % 3600) // 60)
         seconds = int(elapsed % 60)
         self.time_label.configure(text=f"Time: {hours:02d}:{minutes:02d}:{seconds:02d}")
+
+        # GUI események feldolgozása
+        try:
+            self.update()
+        except Exception:
+            pass
 
         # Kovetkezo frissites 1 mp mulva
         self.after(1000, self._update_time_display)
@@ -978,9 +1021,9 @@ class AnalysisMixin:
 
         self._log("Stopping analysis...")
 
-        # Engine leallitasa
-        if hasattr(self, '_analysis_engine') and self._analysis_engine:
-            self._analysis_engine.cancel()
+        # Worker process leállítása
+        if hasattr(self, '_worker_manager') and self._worker_manager:
+            self._worker_manager.stop()
 
         self._stop_time_timer()
         self._reset_analysis_ui()
@@ -1306,10 +1349,7 @@ Note: Panel and Dual modes are mutually exclusive.""")
             self.var_dual_model.set(item.get("dual_model", False))
 
     def _run_analysis_with_item(self, item: dict):
-        """Elemzés futtatása egy auto queue item alapján."""
-        from analysis.engine import AnalysisEngine, AnalysisContext
-        import threading
-
+        """Elemzés futtatása egy auto queue item alapján - MULTIPROCESSING."""
         model_name = item["model"]
         params = item.get("params", {})
         horizon = item.get("horizon", 52)
@@ -1321,29 +1361,38 @@ Note: Panel and Dual modes are mutually exclusive.""")
         # Store output folder for report generation
         self._auto_current_output_folder = item.get("output_folder", "")
 
-        self._analysis_engine = AnalysisEngine()
-        self._analysis_engine.set_progress_callback(self._on_analysis_progress)
+        # Context dict a worker számára (pickle-elhető)
+        context_dict = {
+            'model_name': model_name,
+            'params': params,
+            'forecast_horizon': horizon,
+            'use_gpu': use_gpu,
+            'use_batch': use_batch,
+            'panel_mode': use_panel,
+            'dual_model': use_dual
+        }
 
-        context = AnalysisContext(
-            model_name=model_name,
-            params=params,
-            forecast_horizon=horizon,
-            use_gpu=use_gpu,
-            use_batch=use_batch,
-            panel_mode=use_panel,
-            dual_model=use_dual
-        )
+        # Environment variables a worker számára
+        res_mgr = get_resource_manager()
+        env_vars = res_mgr.get_env_vars()
 
         self._last_logged_percent = -10
+        self._analysis_running = True
         self._analysis_start_time = __import__('time').time()
 
-        self._analysis_thread = threading.Thread(
-            target=self._run_analysis_thread,
-            args=(context,),
-            daemon=True
-        )
-        self._analysis_thread.start()
+        # Worker manager létrehozása és indítása
+        if not hasattr(self, '_worker_manager') or self._worker_manager is None:
+            self._worker_manager = AnalysisWorkerManager()
+
+        # Data másolat a worker-nek
+        with self.data_lock:
+            data_copy = self.processed_data.copy()
+
+        self._worker_manager.start(data_copy, context_dict, env_vars)
         self._start_time_timer()
+
+        # GUI progress poller indítása (poll-olja a Queue-t)
+        self._start_progress_poller()
 
     def _finish_auto_sequence(self):
         """Auto execution sequence befejezése."""
@@ -1408,9 +1457,9 @@ Note: Panel and Dual modes are mutually exclusive.""")
             self._log("Auto execution stopped by user.", "warning")
             self._is_auto_running = False
 
-            # Aktuális elemzés leállítása
-            if hasattr(self, '_analysis_engine') and self._analysis_engine:
-                self._analysis_engine.cancel()
+            # Worker process leállítása
+            if hasattr(self, '_worker_manager') and self._worker_manager:
+                self._worker_manager.stop()
 
             self._finish_auto_sequence()
 

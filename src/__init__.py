@@ -3,4 +3,4 @@ MBO Trading Strategy Analyzer
 Teljes újraírás tiszta architektúrával
 """
 
-__version__ = "5.5.1"
+__version__ = "5.5.2"

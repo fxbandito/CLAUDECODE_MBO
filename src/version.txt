@@ -1,3 +1,11 @@
+v5.5.2 Stable
+- MULTIPROCESSING architektúra: analysis külön process-ben fut (nem threading)
+- GUI SOHA nem fagy: teljes szétválasztás Queue-alapú kommunikációval
+- Új modul: src/analysis/worker.py (AnalysisWorkerManager, WorkerProgress, WorkerResult)
+- Worker process: külön Python interpreter, nincs GIL probléma
+- Progress polling: 250ms interval, non-blocking Queue read
+- Auto execution is multiprocessing alapú
+
 v5.5.1 Stable
 - Auto exec beállítások perzisztenciája (JSON): GPU, Horizon, Data Mode, checkboxok
 - GUI fagyás javítás: optimalizált progress update (250ms throttling, debounced)

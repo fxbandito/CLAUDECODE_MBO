@@ -678,7 +678,7 @@ class AnalysisEngine:
         context: AnalysisContext,
         params: Dict[str, Any]
     ) -> Dict[str, AnalysisResult]:
-        """Szekvenciális feldolgozás - optimalizált progress throttling-gel."""
+        """Szekvenciális feldolgozás - GIL-barát implementáció."""
         results = {}
         error_count = 0
         total = len(strategies)
@@ -694,7 +694,7 @@ class AnalysisEngine:
 
                 self._progress.current_strategy = strategy_id
 
-            # Forecast futtatása (GUI frissítés CSAK utána, throttled)
+            # Forecast futtatása
             start = time.perf_counter()
             try:
                 forecasts = model.forecast(values, context.forecast_horizon, params)
@@ -722,12 +722,16 @@ class AnalysisEngine:
                 elif error_count == 6:
                     logger.warning("Further forecast errors will be suppressed...")
 
-            # Progress frissítés (throttled - nem minden stratégiánál fut ténylegesen)
+            # Progress frissítés (throttled)
             with self._lock:
                 self._progress.completed_strategies = i + 1
                 self._progress.results[strategy_id] = results[strategy_id]
 
-            self._notify_progress()  # Throttled - csak ~10x/sec fog ténylegesen frissíteni
+            self._notify_progress()
+
+            # GIL engedélyezés - minden 5. stratégia után adjunk esélyt a GUI szálnak
+            if i % 5 == 0:
+                time.sleep(0.005)  # 5ms szünet - biztosabb GIL átadás
 
         # Összesített hiba log ha sok volt
         if error_count > 5:
