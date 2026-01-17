@@ -596,34 +596,56 @@ class AnalysisMixin:
             self.after(0, self._reset_analysis_ui)
 
     def _on_analysis_progress(self, progress):
-        """Progress callback - fo szalra atadashoz."""
-        # A progress callback mas szalrol jon, atiranyitjuk a fo szalra
-        try:
-            self.after(0, lambda p=progress: self._update_analysis_progress(p))
-        except Exception:
-            pass  # GUI mar bezarodhatott
+        """Progress callback - fo szalra atadashoz (optimalizált)."""
+        # A progress callback mas szalrol jon - taroljuk a legfrissebb erteket
+        # és hagyjuk a GUI-t a saját ütemezésben frissíteni
+        import time
+        current_time = time.time() * 1000
+        last_update = getattr(self, '_last_progress_update_time', 0)
 
-    def _update_analysis_progress(self, progress):
-        """Progress frissites a fo szalon - optimalizalt log throttling-gel."""
-        if progress.total_strategies > 0:
-            pct = progress.completed_strategies / progress.total_strategies
+        # Tárolás mindig (hogy a legfrissebb érték legyen elérhető)
+        self._latest_progress = progress
 
-            # Progress bar frissitese (0.0 - 1.0)
-            self.set_progress(pct)
+        # Throttling: maximum 4 frissítés másodpercenként (250ms)
+        if current_time - last_update < 250:
+            return
 
-            # Debug log CSAK 10%-onkent (ne terheljuk a log rendszert)
-            pct_int = int(pct * 100)
-            if not hasattr(self, '_last_logged_percent'):
-                self._last_logged_percent = -10
+        self._last_progress_update_time = current_time
 
-            # Log csak ha legalabb 10%-ot leptunk vagy befejezodott
-            if pct_int >= self._last_logged_percent + 10 or pct >= 1.0:
-                self._last_logged_percent = pct_int
-                self._log(
-                    f"Progress: {progress.completed_strategies}/{progress.total_strategies} "
-                    f"({pct_int}%)",
-                    "debug"
-                )
+        # Ha nincs aktív GUI frissítés ütemezve, ütemezzünk egyet
+        if not getattr(self, '_progress_update_scheduled', False):
+            self._progress_update_scheduled = True
+            try:
+                self.after(50, self._do_progress_update)  # 50ms késleltetés
+            except Exception:
+                self._progress_update_scheduled = False
+
+    def _do_progress_update(self):
+        """Tényleges progress frissítés a fő szálon (debounced)."""
+        self._progress_update_scheduled = False
+        progress = getattr(self, '_latest_progress', None)
+
+        if progress is None or progress.total_strategies <= 0:
+            return
+
+        pct = progress.completed_strategies / progress.total_strategies
+
+        # Progress bar frissítése (0.0 - 1.0)
+        self.set_progress(pct)
+
+        # Debug log CSAK 10%-onként (ne terheljük a log rendszert)
+        pct_int = int(pct * 100)
+        if not hasattr(self, '_last_logged_percent'):
+            self._last_logged_percent = -10
+
+        # Log csak ha legalább 10%-ot léptünk vagy befejeződött
+        if pct_int >= self._last_logged_percent + 10 or pct >= 1.0:
+            self._last_logged_percent = pct_int
+            self._log(
+                f"Progress: {progress.completed_strategies}/{progress.total_strategies} "
+                f"({pct_int}%)",
+                "debug"
+            )
 
     def _on_analysis_complete(self, results):
         """Elemzes befejezese."""
@@ -1356,6 +1378,16 @@ Note: Panel and Dual modes are mutually exclusive.""")
         if not getattr(self, '_is_auto_running', False):
             return
 
+        # Automatikus report generálás az output folder-be
+        output_folder = getattr(self, '_auto_current_output_folder', '')
+        if output_folder and hasattr(self, '_on_generate_report'):
+            # Az aktuális item lekérése a report flagekhez
+            item = self._auto_execution_list[self._auto_current_index] if self._auto_current_index < len(self._auto_execution_list) else {}
+            auto_stability = item.get("auto_stability", False)
+            auto_risk = item.get("auto_risk", False)
+
+            self._generate_auto_reports(output_folder, auto_stability, auto_risk)
+
         self._auto_current_index += 1
 
         # Progress frissítése az auto window-ban
@@ -1381,6 +1413,107 @@ Note: Panel and Dual modes are mutually exclusive.""")
                 self._analysis_engine.cancel()
 
             self._finish_auto_sequence()
+
+    def _generate_auto_reports(self, output_folder: str, auto_stability: bool, auto_risk: bool):
+        """Auto execution report generálás - Standard + opcionális Stability/Risk."""
+        import os
+        import copy
+
+        try:
+            # 1. Standard Report generálás
+            self._log(f"Generating Standard report to: {output_folder}")
+            report_path = self._on_generate_report(auto_mode=True, base_dir=output_folder)
+
+            # Suffix kinyerése a mappa névből (pl. _A01)
+            suffix = ""
+            if report_path and os.path.isdir(report_path):
+                dirname = os.path.basename(report_path)
+                if "_A" in dirname:
+                    parts = dirname.split("_A")
+                    if len(parts) > 1 and parts[-1].isdigit():
+                        suffix = f"_A{parts[-1]}"
+
+            if not suffix:
+                logging.warning("Could not extract suffix from report path")
+                return
+
+            # Eredeti eredmények mentése
+            original_results = copy.deepcopy(self.last_results) if hasattr(self, 'last_results') else None
+
+            # 2. Stability Report (opcionális)
+            if auto_stability:
+                try:
+                    self._log("Generating Stability Weighted report...")
+                    self._apply_ranking_for_auto("stability")
+                    self._on_generate_report(auto_mode=True, base_dir=output_folder, forced_suffix=suffix)
+                except Exception as e:
+                    self._log(f"Stability report error: {e}", "warning")
+
+            # 3. Risk Adjusted Report (opcionális)
+            if auto_risk:
+                try:
+                    self._log("Generating Risk Adjusted report...")
+                    self._apply_ranking_for_auto("risk_adjusted")
+                    self._on_generate_report(auto_mode=True, base_dir=output_folder, forced_suffix=suffix)
+                except Exception as e:
+                    self._log(f"Risk report error: {e}", "warning")
+
+            # Eredeti állapot visszaállítása
+            if original_results:
+                self.last_results = original_results
+                self._apply_ranking_for_auto("forecast")
+
+        except Exception as e:
+            self._log(f"Report generation error: {e}", "warning")
+            logging.error(f"Auto report generation failed: {e}")
+
+    def _apply_ranking_for_auto(self, mode: str):
+        """Ranking alkalmazása auto report generáláshoz."""
+        from data.processor import DataProcessor
+        import pandas as pd
+
+        # Stability metrikák kiszámítása ha szükséges
+        if mode in ["stability", "risk_adjusted"]:
+            results_with_stab = getattr(self, 'results_with_stability', None)
+            if results_with_stab is None or (isinstance(results_with_stab, pd.DataFrame) and results_with_stab.empty):
+                self._log("Calculating stability metrics...")
+
+                # Raw data lekérése - explicit None/empty ellenőrzéssel
+                raw_data = getattr(self, 'raw_data', None)
+                if raw_data is None or (isinstance(raw_data, pd.DataFrame) and raw_data.empty):
+                    raw_data = getattr(self, 'processed_data', None)
+
+                results_df = getattr(self, 'results_df', None)
+
+                # Ellenőrzés: mindkét DataFrame elérhető és nem üres
+                raw_ok = raw_data is not None and isinstance(raw_data, pd.DataFrame) and not raw_data.empty
+                results_ok = results_df is not None and isinstance(results_df, pd.DataFrame) and not results_df.empty
+
+                if raw_ok and results_ok:
+                    self.results_with_stability = DataProcessor.calculate_stability_metrics(
+                        raw_data, results_df
+                    )
+                else:
+                    logging.warning(f"Cannot calculate stability: raw_ok={raw_ok}, results_ok={results_ok}")
+                    return
+
+        # Base DataFrame kiválasztása
+        base_df = getattr(self, 'results_with_stability', None)
+        if base_df is None or (isinstance(base_df, pd.DataFrame) and base_df.empty):
+            base_df = getattr(self, 'results_df', None)
+
+        if base_df is None or (isinstance(base_df, pd.DataFrame) and base_df.empty):
+            logging.warning("No results DataFrame for ranking")
+            return
+
+        # Ranking alkalmazása
+        ranked_df, _ = DataProcessor.apply_ranking(base_df, ranking_mode=mode, sort_column="Forecast_1M")
+
+        # Eredmények frissítése
+        if hasattr(self, 'last_results') and self.last_results:
+            self.last_results["results"] = ranked_df
+            self.last_results["ranking_mode"] = mode
+        self.results_df = ranked_df
 
     def _auto_cleanup(self):
         """Memória tisztítás auto futtatások között."""

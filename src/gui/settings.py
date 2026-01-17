@@ -26,6 +26,17 @@ class SettingsManager:
             "x": None,
             "y": None,
         },
+        "auto_exec": {
+            "use_gpu": False,
+            "horizon": 52,
+            "data_mode": "Original",
+            "batch_mode": False,
+            "panel_mode": False,
+            "dual_model": False,
+            "stability_report": False,
+            "risk_report": False,
+            "shutdown_after_all": False,
+        },
         "paths": {
             "last_folder": "",
             "last_parquet_folder": "",
@@ -257,6 +268,18 @@ class SettingsManager:
             "x": x,
             "y": y,
         }
+
+    # === Auto Exec Settings ===
+
+    def get_auto_exec_settings(self) -> dict:
+        """Get auto execution settings (checkboxes, slider values)."""
+        return self.settings.get("auto_exec", self.DEFAULTS["auto_exec"])
+
+    def set_auto_exec_settings(self, settings_dict: dict):
+        """Save auto execution settings."""
+        if "auto_exec" not in self.settings:
+            self.settings["auto_exec"] = {}
+        self.settings["auto_exec"].update(settings_dict)
 
     def get_last_auto_reports_folder(self) -> str:
         """Get last auto reports folder path."""

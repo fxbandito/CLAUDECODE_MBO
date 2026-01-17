@@ -62,8 +62,9 @@ class AutoExecutionWindow(ctk.CTkToplevel):
         self.param_widgets = {}   # Paraméter widgetek
         self.selected_folder = "" # Reports folder
 
-        # Auto.txt fájl útvonala (gui mappában)
-        self.auto_file = os.path.join(os.path.dirname(__file__), "auto.txt")
+        # Auto.txt fájl útvonala (src mappában - egy szinttel feljebb a gui-tól)
+        src_dir = os.path.dirname(os.path.dirname(__file__))
+        self.auto_file = os.path.join(src_dir, "auto.txt")
 
         # UI felépítése
         self._setup_ui()
@@ -73,6 +74,9 @@ class AutoExecutionWindow(ctk.CTkToplevel):
 
         # Queue betöltése fájlból
         self._load_queue()
+
+        # Auto exec beállítások betöltése
+        self._load_auto_exec_settings()
 
         logging.info("AutoExecutionWindow initialized")
 
@@ -124,6 +128,38 @@ class AutoExecutionWindow(ctk.CTkToplevel):
             self.settings.save()
         except (ValueError, IndexError, AttributeError) as e:
             logging.debug(f"Could not parse geometry: {e}")
+
+    def _load_auto_exec_settings(self):
+        """Auto exec beállítások betöltése (checkbox, slider értékek)."""
+        settings = self.settings.get_auto_exec_settings()
+
+        # Checkbox-ok betöltése
+        self.var_gpu.set(settings.get("use_gpu", False))
+        self.slider_horizon.set(settings.get("horizon", 52))
+        self.lbl_horizon.configure(text=str(settings.get("horizon", 52)))
+        self.combo_data_mode.set(settings.get("data_mode", "Original"))
+        self.var_batch.set(settings.get("batch_mode", False))
+        self.var_panel.set(settings.get("panel_mode", False))
+        self.var_dual.set(settings.get("dual_model", False))
+        self.var_stability.set(settings.get("stability_report", False))
+        self.var_risk.set(settings.get("risk_report", False))
+        self.var_shutdown.set(settings.get("shutdown_after_all", False))
+
+    def _save_auto_exec_settings(self):
+        """Auto exec beállítások mentése."""
+        settings_dict = {
+            "use_gpu": self.var_gpu.get(),
+            "horizon": int(self.slider_horizon.get()),
+            "data_mode": self.combo_data_mode.get(),
+            "batch_mode": self.var_batch.get(),
+            "panel_mode": self.var_panel.get(),
+            "dual_model": self.var_dual.get(),
+            "stability_report": self.var_stability.get(),
+            "risk_report": self.var_risk.get(),
+            "shutdown_after_all": self.var_shutdown.get(),
+        }
+        self.settings.set_auto_exec_settings(settings_dict)
+        self.settings.save()
 
     def _setup_ui(self):
         """Fő UI struktúra felépítése."""
@@ -398,6 +434,42 @@ class AutoExecutionWindow(ctk.CTkToplevel):
             command=self._on_dual_change
         )
         self.chk_dual.pack(side="left", padx=5)
+
+        # Reports separator
+        ctk.CTkLabel(
+            row,
+            text="|",
+            font=ctk.CTkFont(size=11),
+            text_color="#666666"
+        ).pack(side="left", padx=10)
+
+        ctk.CTkLabel(
+            row,
+            text=tr("Reports:"),
+            font=ctk.CTkFont(size=11)
+        ).pack(side="left", padx=(0, 5))
+
+        # Stability Report checkbox
+        self.var_stability = ctk.BooleanVar(value=False)
+        self.chk_stability = ctk.CTkCheckBox(
+            row,
+            text=tr("Stability"),
+            variable=self.var_stability,
+            font=ctk.CTkFont(size=11),
+            width=70
+        )
+        self.chk_stability.pack(side="left", padx=5)
+
+        # Risk Report checkbox
+        self.var_risk = ctk.BooleanVar(value=False)
+        self.chk_risk = ctk.CTkCheckBox(
+            row,
+            text=tr("Risk"),
+            variable=self.var_risk,
+            font=ctk.CTkFont(size=11),
+            width=50
+        )
+        self.chk_risk.pack(side="left", padx=5)
 
     def _init_model_selection(self):
         """Kezdeti model selection inicializálás."""
@@ -702,6 +774,8 @@ class AutoExecutionWindow(ctk.CTkToplevel):
             "batch_mode": self.var_batch.get(),
             "panel_mode": self.var_panel.get(),
             "dual_model": self.var_dual.get(),
+            "auto_stability": self.var_stability.get(),
+            "auto_risk": self.var_risk.get(),
         }
 
         self.execution_list.append(item)
@@ -813,16 +887,24 @@ class AutoExecutionWindow(ctk.CTkToplevel):
             mode_parts.append("Panel")
         if item.get("dual_model"):
             mode_parts.append("Dual")
-        if item.get("data_mode", "original") != "original":
+        if item.get("data_mode", "Original") != "Original":
             mode_parts.append(item["data_mode"])
 
+        # Report típusok
+        report_parts = []
+        if item.get("auto_stability"):
+            report_parts.append("Stab")
+        if item.get("auto_risk"):
+            report_parts.append("Risk")
+
         mode_str = f"[{'/'.join(mode_parts)}] " if mode_parts else ""
+        report_str = f" +{','.join(report_parts)}" if report_parts else ""
 
         params_str = ", ".join([f"{k}: {v}" for k, v in item["params"].items()])
         if len(params_str) > 60:
             params_str = params_str[:57] + "..."
 
-        display_text = f"{mode_str}{item['model']} ({item['category']})"
+        display_text = f"{mode_str}{item['model']} ({item['category']}){report_str}"
         if params_str:
             display_text += f" | {params_str}"
 
@@ -860,6 +942,9 @@ class AutoExecutionWindow(ctk.CTkToplevel):
 
         logging.info(f"Starting auto execution with {len(self.execution_list)} items")
 
+        # Beállítások mentése indítás előtt
+        self._save_auto_exec_settings()
+
         # UI állapot - Start gomb letiltása
         self.btn_start.configure(state="disabled", text=tr("Running..."))
         self.progress_bar.set(0)
@@ -868,8 +953,8 @@ class AutoExecutionWindow(ctk.CTkToplevel):
         shutdown = self.var_shutdown.get()
         self.parent.run_auto_sequence(self.execution_list, shutdown)
 
-        # Ablak elrejtése (opcionális - futás közben is látható maradhat)
-        # self.withdraw()
+        # Ablak elrejtése futás közben
+        self.withdraw()
 
     def update_start_button_state(self):
         """Start gomb állapotának frissítése (futás befejezése után)."""
@@ -880,11 +965,14 @@ class AutoExecutionWindow(ctk.CTkToplevel):
         self.progress_bar.set(0)
 
     def _on_close(self):
-        """Ablak bezárás kezelése - geometry mentés és elrejtés."""
+        """Ablak bezárás kezelése - geometry és beállítások mentés, majd elrejtés."""
         logging.debug("AutoExecutionWindow closing (withdraw)")
 
         # Geometry mentése
         self._save_geometry()
+
+        # Auto exec beállítások mentése
+        self._save_auto_exec_settings()
 
         # Grab elengedése
         try:

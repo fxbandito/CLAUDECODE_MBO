@@ -29,8 +29,10 @@ from gui.tabs.inspection import InspectionTabMixin
 
 from analysis.engine import get_resource_manager
 
-# Application logger for file logging
-logger = logging.getLogger("GUI")
+# Application loggers for file logging
+# Root logger for guaranteed file logging (in debug mode)
+# Using root logger ensures messages reach the file handler attached in configure_debug_logging()
+root_logger = logging.getLogger()
 
 
 def get_version() -> str:
@@ -607,15 +609,17 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ComparisonMixin, Ins
 
     def _log(self, message: str, level: str = "info"):
         """
-        Kétszintű log rendszer:
-        - GUI: Csak fontos üzenetek (info, warning, error, critical)
+        Kétszintű log rendszer intelligens szín-detektálással:
+        - GUI: Fontos üzenetek szín-kódolással
         - File: Minden üzenet (debug is) - hibakereséshez
 
         Levels:
-        - "info" / "normal": Fontos info - GUI + File (zöld)
-        - "debug": Részletes - CSAK File (nem jelenik meg GUI-ban)
-        - "warning": Figyelmeztetés - GUI + File (narancs)
-        - "error" / "critical": Hiba - GUI + File (piros)
+        - "info" / "normal": Általános - GUI (fehér) + File
+        - "debug": Részletes - CSAK File
+        - "warning": Figyelmeztetés - GUI (narancs) + File
+        - "error" / "critical": Hiba - GUI (piros) + File
+        - "success": Auto progress, sikeres befejezés - GUI (zöld) + File
+        - "highlight": Fontos eredmények (best strategy) - GUI (sárga) + File
         """
         timestamp = datetime.now().strftime("%H:%M:%S")
 
@@ -623,16 +627,23 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ComparisonMixin, Ins
         if level == "normal":
             level = "info"
 
-        # Always log to file (Python logging)
+        # Automatikus szín-detektálás a message tartalma alapján (ha level=info)
+        if level == "info":
+            level = self._detect_log_level(message)
+
+        # Always log to file (Python logging) - use root logger for guaranteed file output
         log_level_map = {
             "debug": logging.DEBUG,
             "info": logging.INFO,
             "warning": logging.WARNING,
             "error": logging.ERROR,
             "critical": logging.CRITICAL,
+            "success": logging.INFO,
+            "highlight": logging.INFO,
         }
         py_level = log_level_map.get(level, logging.INFO)
-        logger.log(py_level, message)
+        # Use root logger directly to ensure messages reach file handler in debug mode
+        root_logger.log(py_level, f"[GUI] {message}")
 
         # Only show in GUI if level is visible (not debug)
         if level not in LogLevel.GUI_VISIBLE:
@@ -641,13 +652,13 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ComparisonMixin, Ins
         # Format for GUI display
         if level in ("error", "critical"):
             prefix = "[ERROR] "
-            color = LogLevel.COLORS.get("error")
         elif level == "warning":
             prefix = "[WARN] "
-            color = LogLevel.COLORS.get("warning")
         else:
             prefix = ""
-            color = LogLevel.COLORS.get("info")
+
+        # Get color from LogLevel
+        color = LogLevel.COLORS.get(level, LogLevel.COLORS.get("info"))
 
         formatted = f"[{timestamp}] {prefix}{message}\n"
 
@@ -664,6 +675,51 @@ class MBOApp(DataLoadingMixin, AnalysisMixin, ResultsMixin, ComparisonMixin, Ins
             self.log_textbox.insert("end", formatted)
 
         self.log_textbox.see("end")
+
+    def _detect_log_level(self, message: str) -> str:
+        """
+        Automatikus log level detektálás az üzenet tartalma alapján.
+
+        Returns:
+            "success": Auto progress, sikeres futtatás üzenetek (zöld)
+            "highlight": Fontos eredmények, best strategy (sárga)
+            "info": Általános üzenetek (fehér)
+        """
+        msg_lower = message.lower()
+
+        # SUCCESS (zöld) - Auto progress, completion
+        success_patterns = [
+            "auto execution",
+            "starting auto",
+            "/4", "/3", "/2",  # Auto run progress (1/4, 2/4, etc.)
+            "analysis complete",
+            "complete:",
+            "completed",
+            "loaded",
+            "ready",
+            "saved",
+            "generated report",
+            "generating",
+        ]
+        for pattern in success_patterns:
+            if pattern in msg_lower:
+                return "success"
+
+        # HIGHLIGHT (sárga) - Best strategy, fontos eredmények
+        highlight_patterns = [
+            "best strategy",
+            "best:",
+            "top strategy",
+            "highest",
+            "results ready",
+            "strategies succeeded",
+        ]
+        for pattern in highlight_patterns:
+            if pattern in msg_lower:
+                return "highlight"
+
+        # Default: info (fehér)
+        return "info"
 
     def set_progress(self, value: float):
         """Progress bar beállítása (0.0 - 1.0)."""

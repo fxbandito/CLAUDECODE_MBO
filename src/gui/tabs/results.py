@@ -609,22 +609,23 @@ class ResultsMixin:
                     except (ValueError, KeyError, IndexError, TypeError) as e:
                         self.after(0, lambda err=e: self._log(f"Error re-simulating: {err}"))
 
-            # Create specific subfolder
+            # Create specific subfolder with unique A01, A02 naming
             currency_pair = filename_base.split("_")[0]
             folder_name = f"{method}_{currency_pair}_{ranking_suffix}"
             original_folder_name = folder_name
 
-            # Auto Mode: Unique naming
-            if auto_mode:
-                if forced_suffix:
-                    folder_name = f"{original_folder_name}{forced_suffix}"
-                else:
-                    counter = 1
-                    while True:
-                        folder_name = f"{original_folder_name}_A{counter:02d}"
-                        if not os.path.exists(os.path.join(base_output_dir, folder_name)):
-                            break
-                        counter += 1
+            # Unique naming - A01, A02, stb. (auto és manual módban is)
+            if forced_suffix:
+                # Auto exec Stability/Risk report - ugyanaz a suffix mint Standard
+                folder_name = f"{original_folder_name}{forced_suffix}"
+            else:
+                # Új unique suffix generálása
+                counter = 1
+                while True:
+                    folder_name = f"{original_folder_name}_A{counter:02d}"
+                    if not os.path.exists(os.path.join(base_output_dir, folder_name)):
+                        break
+                    counter += 1
 
             report_dir = os.path.join(base_output_dir, folder_name)
             if not os.path.exists(report_dir):
@@ -828,10 +829,18 @@ class ResultsMixin:
             ranking_suffix = ranking_suffix_map.get(ranking_mode, "Standard")
 
             currency_pair = filename_base.split("_")[0]
-            folder_name = f"{method}_{currency_pair}_{ranking_suffix}"
+            original_folder_name = f"{method}_{currency_pair}_{ranking_suffix}"
+
+            # Unique naming - A01, A02, stb.
+            counter = 1
+            while True:
+                folder_name = f"{original_folder_name}_A{counter:02d}"
+                if not os.path.exists(os.path.join(base_output_dir, folder_name)):
+                    break
+                counter += 1
+
             report_dir = os.path.join(base_output_dir, folder_name)
-            if not os.path.exists(report_dir):
-                os.makedirs(report_dir)
+            os.makedirs(report_dir)
 
             exporter = ReportExporter(report_dir)
             md_path, html_path = exporter.create_all_results_report(
@@ -895,10 +904,18 @@ class ResultsMixin:
             ranking_suffix = ranking_suffix_map.get(ranking_mode, "Standard")
 
             currency_pair = filename_base.split("_")[0]
-            folder_name = f"{method}_{currency_pair}_{ranking_suffix}"
+            original_folder_name = f"{method}_{currency_pair}_{ranking_suffix}"
+
+            # Unique naming - A01, A02, stb.
+            counter = 1
+            while True:
+                folder_name = f"{original_folder_name}_A{counter:02d}"
+                if not os.path.exists(os.path.join(base_output_dir, folder_name)):
+                    break
+                counter += 1
+
             report_dir = os.path.join(base_output_dir, folder_name)
-            if not os.path.exists(report_dir):
-                os.makedirs(report_dir)
+            os.makedirs(report_dir)
 
             exporter = ReportExporter(report_dir)
             mr_filename_base = f"MR_{method}_{filename_base}"

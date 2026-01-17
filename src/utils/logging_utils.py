@@ -39,34 +39,40 @@ class LogLevel:
     Log level constants with colors for GUI.
 
     Levels for GUI display:
-    - INFO: Important messages shown in GUI (green) - data loaded, analysis complete, etc.
+    - INFO: General messages shown in GUI (white) - default
     - DEBUG: Detailed messages for file log only (not shown in GUI)
     - WARNING: Warnings shown in GUI (orange)
     - ERROR/CRITICAL: Errors shown in GUI (red)
+    - SUCCESS: Auto progress, completion messages (green)
+    - HIGHLIGHT: Important findings like best strategy (yellow)
     """
 
     # GUI display levels
-    INFO = "info"          # Important - shown in GUI (green)
+    INFO = "info"          # General - shown in GUI (white)
     DEBUG = "debug"        # Detailed - file only (not shown in GUI)
     WARNING = "warning"    # Warnings - shown in GUI (orange)
     ERROR = "error"        # Errors - shown in GUI (red)
     CRITICAL = "critical"  # Critical - shown in GUI (red)
+    SUCCESS = "success"    # Auto progress - shown in GUI (green)
+    HIGHLIGHT = "highlight"  # Important findings - shown in GUI (yellow)
 
     # Legacy aliases for backward compatibility
     NORMAL = "info"
 
     # Colors for GUI display
     COLORS = {
-        "info": "#2ecc71",     # Green - important info
+        "info": "#ffffff",     # White - general info
         "debug": None,         # Not shown in GUI
         "warning": "#f39c12",  # Orange
         "error": "#e74c3c",    # Red
         "critical": "#e74c3c", # Red
-        "normal": "#2ecc71",   # Legacy alias
+        "success": "#2ecc71",  # Green - auto progress, completion
+        "highlight": "#f1c40f", # Yellow - important findings
+        "normal": "#ffffff",   # Legacy alias - white
     }
 
     # Which levels should appear in GUI
-    GUI_VISIBLE = {"info", "warning", "error", "critical", "normal"}
+    GUI_VISIBLE = {"info", "warning", "error", "critical", "normal", "success", "highlight"}
 
 
 def create_log_message(event: str, details: Optional[str] = None, **kwargs) -> str:
@@ -324,6 +330,12 @@ def configure_debug_logging(log_dir_base: str = "Log", filename_prefix: str = "m
         for module_name in debug_modules:
             module_logger = logging.getLogger(module_name)
             module_logger.setLevel(logging.DEBUG)
+            # Ensure propagation to root logger (for file handler)
+            module_logger.propagate = True
+
+        # Also add file handler directly to GUI logger for guaranteed file logging
+        gui_logger = logging.getLogger("GUI")
+        gui_logger.addHandler(file_handler)
 
         # Capture all Python warnings
         logging.captureWarnings(True)

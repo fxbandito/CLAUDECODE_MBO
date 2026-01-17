@@ -1,3 +1,9 @@
+v5.5.1 Stable
+- Auto exec beállítások perzisztenciája (JSON): GPU, Horizon, Data Mode, checkboxok
+- GUI fagyás javítás: optimalizált progress update (250ms throttling, debounced)
+- Application Log színek: fehér (általános), zöld (progress), sárga (fontos), piros (hiba)
+- Logging rendszer javítás: root logger használat garantált file output-hoz
+
 v5.5.0 Stable
 - Auto Execution Manager implementáció (AutoExecutionWindow)
 - Queue-based automatic model execution with persistence (auto.txt)
