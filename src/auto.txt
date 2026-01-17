@@ -1,0 +1,84 @@
+[
+  {
+    "category": "Statistical Models",
+    "model": "ADIDA",
+    "params": {
+      "method": "standard",
+      "aggregation_level": "4",
+      "base_model": "SES",
+      "alpha": "0.1",
+      "beta": "0.1",
+      "use_weighted_disagg": "True",
+      "seasonal_periods": "12"
+    },
+    "output_folder": "C:/Users/bandi/MBO/MBO_Data/Reports_new",
+    "use_gpu": false,
+    "horizon": 52,
+    "data_mode": "Original",
+    "batch_mode": false,
+    "panel_mode": false,
+    "dual_model": false,
+    "auto_stability": true,
+    "auto_risk": true
+  },
+  {
+    "category": "Statistical Models",
+    "model": "ADIDA",
+    "params": {
+      "method": "standard",
+      "aggregation_level": "4",
+      "base_model": "SES",
+      "alpha": "0.1",
+      "beta": "0.1",
+      "use_weighted_disagg": "True",
+      "seasonal_periods": "12"
+    },
+    "output_folder": "C:/Users/bandi/MBO/MBO_Data/Reports_new",
+    "use_gpu": false,
+    "horizon": 52,
+    "data_mode": "Original",
+    "batch_mode": true,
+    "panel_mode": false,
+    "dual_model": false,
+    "auto_stability": true,
+    "auto_risk": true
+  },
+  {
+    "category": "Statistical Models",
+    "model": "ARIMA",
+    "params": {
+      "p": "1",
+      "d": "1",
+      "q": "1",
+      "trend": "c"
+    },
+    "output_folder": "C:/Users/bandi/MBO/MBO_Data/Reports_new",
+    "use_gpu": false,
+    "horizon": 52,
+    "data_mode": "Original",
+    "batch_mode": false,
+    "panel_mode": false,
+    "dual_model": false,
+    "auto_stability": true,
+    "auto_risk": true
+  },
+  {
+    "category": "Statistical Models",
+    "model": "ARIMA",
+    "params": {
+      "p": "1",
+      "d": "1",
+      "q": "1",
+      "trend": "c"
+    },
+    "output_folder": "C:/Users/bandi/MBO/MBO_Data/Reports_new",
+    "use_gpu": false,
+    "horizon": 52,
+    "data_mode": "Original",
+    "batch_mode": true,
+    "panel_mode": false,
+    "dual_model": false,
+    "auto_stability": true,
+    "auto_risk": true
+  }
+]

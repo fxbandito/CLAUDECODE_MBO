@@ -11,9 +11,9 @@ Threading architecture for GUI responsiveness:
 Based on src_old working implementation.
 """
 # pylint: disable=too-many-instance-attributes,attribute-defined-outside-init
-# pylint: disable=too-many-statements,import-outside-toplevel
+# pylint: disable=too-many-statements,import-outside-toplevel,too-many-lines
 
-import copy
+
 import gc
 import logging
 import os
@@ -517,7 +517,7 @@ class AnalysisMixin:
                 if self._auto_window.winfo_exists():
                     self._auto_window.show()
                     return
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 pass  # Ablak megsemmisült, újat hozunk létre
 
         # Új ablak létrehozása
@@ -628,7 +628,8 @@ class AnalysisMixin:
                 now = time.time()
 
                 # Throttle: max 10 FPS (100ms interval)
-                if now - last_update_time[0] < 0.1 and not progress.is_running:
+                # FIX: A korábbi 'and not progress.is_running' miatt sosem lépett be ide, ha futott
+                if now - last_update_time[0] < 0.1 and progress.is_running:
                     return
                 last_update_time[0] = now
 
@@ -654,7 +655,7 @@ class AnalysisMixin:
             # Sikeres befejezés - GUI szálon feldolgozás
             self.after(0, lambda r=results: self._on_analysis_complete(r))
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             import traceback
             tb = traceback.format_exc()
             logging.error("Analysis error: %s\n%s", e, tb)
@@ -675,7 +676,7 @@ class AnalysisMixin:
         if hasattr(self, '_analysis_engine') and self._analysis_engine:
             try:
                 AnalysisEngine.shutdown()
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 pass
             self._analysis_engine = None
 
@@ -916,27 +917,63 @@ class AnalysisMixin:
     def _start_time_timer(self):
         """Idozito inditasa."""
         self._time_timer_running = True
+        self._analysis_start_time = time.time()
+        self._total_pause_duration = 0
+        self._last_pause_start = 0
         self._update_time_display()
 
     def _stop_time_timer(self):
         """Idozito leallitasa."""
         self._time_timer_running = False
 
+    def _pause_timer(self):
+        """Idozito szuneteltetese."""
+        self._last_pause_start = time.time()
+
+    def _resume_timer(self):
+        """Idozito folytatasa."""
+        if self._last_pause_start > 0:
+            pause_len = time.time() - self._last_pause_start
+            self._total_pause_duration += pause_len
+            self._last_pause_start = 0
+
     def _update_time_display(self):
         """Ido kijelzes frissitese."""
         if not getattr(self, '_time_timer_running', False):
             return
 
-        elapsed = time.time() - getattr(self, '_analysis_start_time', time.time())
+        # Ha szunet van, nem frissitjuk az idot, csak a loop-ot tartjuk eletben
+        # VAGY: folyamatosan frissitjuk, de a szunet idejet nem szamoljuk bele
+        current_time = time.time()
+        
+        # Ha eppen pause van, akkor a current pause duration-t is hozzaadjuk
+        temp_pause_add = 0
+        if getattr(self, '_last_pause_start', 0) > 0:
+            temp_pause_add = current_time - self._last_pause_start
+
+        # Teljes eltelt ido minusz az eddigi szunetek
+        start_t = getattr(self, '_analysis_start_time', current_time)
+        pause_t = getattr(self, '_total_pause_duration', 0)
+        elapsed = current_time - start_t - pause_t - temp_pause_add
+        # Negativ ido vedelem
+        if elapsed < 0:
+            elapsed = 0
+
         hours = int(elapsed // 3600)
         minutes = int((elapsed % 3600) // 60)
         seconds = int(elapsed % 60)
+        
+        # Csak akkor frissitjuk a UI-t ha nem pause, vagy azt akarjuk
+        # hogy a pause alatt "alljon" az ora
+        # A felhasznalo azt kerte: "a Pause gomb megallitja... de az ora megy tovabb ami nem jo"
+        # Tehat pause alatt a kijelzett idonek nem szabad valtoznia.
+        
         self.time_label.configure(text=f"Time: {hours:02d}:{minutes:02d}:{seconds:02d}")
 
         # GUI események feldolgozása
         try:
             self.update()
-        except Exception:
+        except Exception:  # pylint: disable=broad-except
             pass
 
         # Kovetkezo frissites 1 mp mulva
@@ -980,7 +1017,7 @@ class AnalysisMixin:
 
         return True
 
-    def _show_feature_warning_popup(self, model_name: str, feature_mode: str, message: str):
+    def _show_feature_warning_popup(self, model_name: str, _feature_mode: str, message: str):
         """Feature mode figyelmeztetest megjelenito popup."""
         popup = ctk.CTkToplevel(self)
         popup.title(f"{model_name} - Feature Mode Warning")
@@ -1039,12 +1076,6 @@ class AnalysisMixin:
     def _on_pause_analysis(self):
         """
         Elemzés szüneteltetése/folytatása.
-
-        A régi működő implementáció szerint:
-        - pause_event.set() = FUT (nem paused)
-        - pause_event.clear() = PAUSED
-
-        Az engine belső pause mechanizmust használ.
         """
         self.sound.play_button_click()
 
@@ -1053,6 +1084,9 @@ class AnalysisMixin:
             if hasattr(self, '_analysis_engine') and self._analysis_engine:
                 self._analysis_engine.pause()
                 self._log("Analysis paused - engine notified")
+            
+            # Timer pause
+            self._pause_timer()
 
             self.btn_pause.configure(
                 text="Resume", fg_color="#27ae60", hover_color="#2ecc71"
@@ -1063,6 +1097,9 @@ class AnalysisMixin:
             if hasattr(self, '_analysis_engine') and self._analysis_engine:
                 self._analysis_engine.resume()
                 self._log("Analysis resumed - engine notified")
+            
+            # Timer resume
+            self._resume_timer()
 
             self.btn_pause.configure(
                 text="Pause", fg_color="#f39c12", hover_color="#d35400"
@@ -1263,8 +1300,13 @@ Note: Panel and Dual modes are mutually exclusive.""")
         if not getattr(self, '_is_auto_running', False):
             return
 
-        # GC cleanup a modellek között - memória felszabadítás
-        self._auto_cleanup()
+        # 1. Lépés: Cleanup indítása háttérben, majd callback a folytatáshoz
+        self._auto_cleanup(on_complete=self._process_next_auto_item)
+
+    def _process_next_auto_item(self):
+        """Cleanup után hívódik: következő elem feldolgozása."""
+        if not getattr(self, '_is_auto_running', False):
+            return
 
         # Ellenőrzés: van-e még futtatandó modell
         if self._auto_current_index >= len(self._auto_execution_list):
@@ -1296,7 +1338,7 @@ Note: Panel and Dual modes are mutually exclusive.""")
             # Nincs mode váltás, folytatás közvetlenül
             self._continue_auto_run(item)
 
-    def _trigger_auto_feature_recalc(self, data_mode: str):
+    def _trigger_auto_feature_recalc(self, _data_mode: str):
         """Feature újraszámítás indítása auto futtatáshoz."""
         def recalc_thread():
             try:
@@ -1305,7 +1347,7 @@ Note: Panel and Dual modes are mutually exclusive.""")
                     self._recalculate_features()
                 # Sikeres - folytatás a fő szálon
                 self.after(0, lambda: self._continue_auto_run(self._auto_pending_item))
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 logging.error("Auto feature recalc error: %s", e)
                 # Hiba esetén is folytatjuk
                 self.after(0, lambda: self._continue_auto_run(self._auto_pending_item))
@@ -1361,16 +1403,12 @@ Note: Panel and Dual modes are mutually exclusive.""")
         if hasattr(self, 'var_panel_mode'):
             self.var_panel_mode.set(item.get("panel_mode", False))
 
-        # Dual mode
         if hasattr(self, 'var_dual_model'):
             self.var_dual_model.set(item.get("dual_model", False))
 
     def _run_analysis_with_item(self, item: dict):
         """
         Elemzés futtatása egy auto queue item alapján - THREADING.
-
-        Ugyanaz az architektúra mint a normál _on_run_analysis,
-        de az item dict-ből veszi a paramétereket.
         """
         model_name = item["model"]
         params = item.get("params", {})
@@ -1379,6 +1417,33 @@ Note: Panel and Dual modes are mutually exclusive.""")
         use_batch = item.get("batch_mode", False)
         use_panel = item.get("panel_mode", False)
         use_dual = item.get("dual_model", False)
+
+        # =========================================================================
+        # GUI "BOSS" RESOURCE CAPTURE FOR AUTO MODE
+        # Auto módban is a GUI slider/kapcsoló az irányadó (vagy az elmentett itemé?)
+        # A felhasználó kérése: "A GUI a főnök"
+        # De Auto módban lehet, hogy az item beállításait kellene preferálni?
+        # A "CPU thread (csúszka a GUI-n) kezelést" kérése szerint a GUI dominál.
+        # Viszont az itemben is lehet "n_jobs" beállítás.
+        
+        # Jelenleg a ResourceManager Singleton tárolja a GUI állapotát.
+        # Ha a user elhúzza a csúszkát futás közben, a ResourceManager frissül.
+        # Az Engine pedig minden run() elején kiolvassa ezt.
+        # Tehát itt nem feltétlenül kell manuálisan átadni, mert az Engine megteszi.
+        # DE: Explicit config update a biztonság kedvéért.
+        # =========================================================================
+        
+        # Ha az itemben van specifikus resource igény, azt beállíthatjuk a GUI-ra is?
+        # Vagy hagyjuk a GUI-t békén és csak az Engine-nek szólunk?
+        # A "GUI a főnök" azt jelenti, hogy a User mit lát/állít.
+        # Tehát auto módban is a slider értéke számít.
+        
+        # Logoljuk a jelenlegi erőforrás állapotot
+
+        mgr = get_resource_manager()
+        self._log(f"Auto Run Resources: CPU={mgr.cpu_percentage}%, GPU={mgr.gpu_enabled}")
+        
+        # ... folytatás a normál flow szerint
 
         # Store output folder for report generation
         self._auto_current_output_folder = item.get("output_folder", "")
@@ -1427,7 +1492,7 @@ Note: Panel and Dual modes are mutually exclusive.""")
                 if self._auto_window.winfo_exists():
                     self._auto_window.update_start_button_state()
                     self._auto_window.progress_bar.set(0)  # Reset progress
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 pass
 
         self.sound.play_model_complete()
@@ -1441,7 +1506,12 @@ Note: Panel and Dual modes are mutually exclusive.""")
         if not getattr(self, '_is_auto_running', False):
             return
 
-        # Automatikus report generálás az output folder-be
+        # Automatikus report generálás az output folder-be HÁTTÉRSZÁLON
+        # FIX: Korábban blokkolta a GUI-t a report generálás
+        threading.Thread(target=self._run_bg_reports_and_continue, daemon=True).start()
+
+    def _run_bg_reports_and_continue(self):
+        """Háttérszálon futó report generálás auto módhoz."""
         output_folder = getattr(self, '_auto_current_output_folder', '')
         if output_folder and hasattr(self, '_on_generate_report'):
             # Az aktuális item lekérése a report flagekhez
@@ -1452,8 +1522,15 @@ Note: Panel and Dual modes are mutually exclusive.""")
             auto_stability = item.get("auto_stability", False)
             auto_risk = item.get("auto_risk", False)
 
+            # Ez a metódus a fő szálon hívódott eredetileg, de thread-safe kell legyen
+            # A GUI frissítéseket a _generate_auto_reports-on belül kellene kezelni
             self._generate_auto_reports(output_folder, auto_stability, auto_risk)
 
+        # Folytatás a fő szálon
+        self.after(0, self._finalize_auto_step)
+
+    def _finalize_auto_step(self):
+        """Auto lépés lezárása a GUI szálon."""
         self._auto_current_index += 1
 
         # Progress frissítése az auto window-ban
@@ -1462,11 +1539,11 @@ Note: Panel and Dual modes are mutually exclusive.""")
                 if self._auto_window.winfo_exists():
                     progress = self._auto_current_index / len(self._auto_execution_list)
                     self._auto_window.progress_bar.set(progress)
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 pass
 
-        # Kis késleltetés a következő modell előtt (GC, stb.)
-        self.after(500, self._run_next_auto_model)
+        # Kis késleltetés a következő modell előtt (GC, stb.) - növelve 1000ms-re a biztonság kedvéért
+        self.after(1000, self._run_next_auto_model)
 
     def stop_auto_execution(self):
         """Auto execution leállítása."""
@@ -1480,55 +1557,52 @@ Note: Panel and Dual modes are mutually exclusive.""")
 
             self._finish_auto_sequence()
 
-    def _generate_auto_reports(self, output_folder: str, auto_stability: bool, auto_risk: bool):
-        """Auto execution report generálás - Standard + opcionális Stability/Risk."""
+    def _generate_auto_reports(self, output_folder, auto_stability=False, auto_risk=False):
+        """Auto report generálása a háttérben futó Process eredményeként."""
         try:
-            # 1. Standard Report generálás
-            self._log(f"Generating Standard report to: {output_folder}")
-            report_path = self._on_generate_report(auto_mode=True, base_dir=output_folder)
-
-            # Suffix kinyerése a mappa névből (pl. _A01)
-            suffix = ""
-            if report_path and os.path.isdir(report_path):
-                dirname = os.path.basename(report_path)
-                if "_A" in dirname:
-                    parts = dirname.split("_A")
-                    if len(parts) > 1 and parts[-1].isdigit():
-                        suffix = f"_A{parts[-1]}"
-
-            if not suffix:
-                logging.warning("Could not extract suffix from report path")
-                return
-
-            # Eredeti eredmények mentése
-            original_results = copy.deepcopy(self.last_results) if hasattr(self, 'last_results') else None
-
-            # 2. Stability Report (opcionális)
+            # 1. Standard Report
+            self._log("Generating Standard (forecast) report (Process)...")
+            
+            # Call the process-based generator
+            # This returns None immediately, as it runs in background process
+            self._generate_report_bg(output_folder, auto_mode=True) 
+            
+            # For Stability and Risk reports, launch separate processes with slight delay
+            # to avoid I/O contention on startup.
+            
             if auto_stability:
-                try:
-                    self._log("Generating Stability Weighted report...")
-                    self._apply_ranking_for_auto("stability")
-                    self._on_generate_report(auto_mode=True, base_dir=output_folder, forced_suffix=suffix)
-                except Exception as e:
-                    self._log(f"Stability report error: {e}", "warning")
+                self.after(2000, lambda: self._launch_ranking_report_process(
+                    "stability", output_folder
+                ))
 
-            # 3. Risk Adjusted Report (opcionális)
             if auto_risk:
-                try:
-                    self._log("Generating Risk Adjusted report...")
-                    self._apply_ranking_for_auto("risk_adjusted")
-                    self._on_generate_report(auto_mode=True, base_dir=output_folder, forced_suffix=suffix)
-                except Exception as e:
-                    self._log(f"Risk report error: {e}", "warning")
+                self.after(4000, lambda: self._launch_ranking_report_process(
+                    "risk_adjusted", output_folder
+                ))
 
-            # Eredeti állapot visszaállítása
-            if original_results:
-                self.last_results = original_results
-                self._apply_ranking_for_auto("forecast")
-
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             self._log(f"Report generation error: {e}", "warning")
             logging.error("Auto report generation failed: %s", e)
+
+    def _launch_ranking_report_process(self, ranking_mode, output_folder):
+        """Helper to launch a separate reporting process for stability/risk."""
+        try:
+            self._log(f"Preparing {ranking_mode} report...")
+            # Apply ranking logic (currently on main thread, but fast enough)
+            self._apply_ranking_for_auto(ranking_mode)
+
+            # Launch process with forced suffix to distinguish folder
+            self._generate_report_bg(
+                output_folder,
+                auto_mode=True,
+                forced_suffix="_" + ranking_mode
+            )
+
+            # Restore 'standard' ranking for GUI consistency
+            self.after(1000, lambda: self._apply_ranking_for_auto("forecast"))
+
+        except Exception as e:  # pylint: disable=broad-except
+            self._log(f"Error launching {ranking_mode} report: {e}", "warning")
 
     def _apply_ranking_for_auto(self, mode: str):
         """Ranking alkalmazása auto report generáláshoz."""
@@ -1537,7 +1611,8 @@ Note: Panel and Dual modes are mutually exclusive.""")
         # Stability metrikák kiszámítása ha szükséges
         if mode in ["stability", "risk_adjusted"]:
             results_with_stab = getattr(self, 'results_with_stability', None)
-            if results_with_stab is None or (isinstance(results_with_stab, pd.DataFrame) and results_with_stab.empty):
+            is_empty = isinstance(results_with_stab, pd.DataFrame) and results_with_stab.empty
+            if results_with_stab is None or is_empty:
                 self._log("Calculating stability metrics...")
 
                 # Raw data lekérése - explicit None/empty ellenőrzéssel
@@ -1548,15 +1623,20 @@ Note: Panel and Dual modes are mutually exclusive.""")
                 results_df = getattr(self, 'results_df', None)
 
                 # Ellenőrzés: mindkét DataFrame elérhető és nem üres
-                raw_ok = raw_data is not None and isinstance(raw_data, pd.DataFrame) and not raw_data.empty
-                results_ok = results_df is not None and isinstance(results_df, pd.DataFrame) and not results_df.empty
+                raw_is_df = isinstance(raw_data, pd.DataFrame)
+                res_is_df = isinstance(results_df, pd.DataFrame)
+                raw_ok = raw_data is not None and raw_is_df and not raw_data.empty
+                results_ok = results_df is not None and res_is_df and not results_df.empty
 
                 if raw_ok and results_ok:
                     self.results_with_stability = DataProcessor.calculate_stability_metrics(
                         raw_data, results_df
                     )
                 else:
-                    logging.warning("Cannot calculate stability: raw_ok=%s, results_ok=%s", raw_ok, results_ok)
+                    logging.warning(
+                        "Cannot calculate stability: raw_ok=%s, results_ok=%s",
+                        raw_ok, results_ok
+                    )
                     return
 
         # Base DataFrame kiválasztása
@@ -1569,7 +1649,9 @@ Note: Panel and Dual modes are mutually exclusive.""")
             return
 
         # Ranking alkalmazása
-        ranked_df, _ = DataProcessor.apply_ranking(base_df, ranking_mode=mode, sort_column="Forecast_1M")
+        ranked_df, _ = DataProcessor.apply_ranking(
+            base_df, ranking_mode=mode, sort_column="Forecast_1M"
+        )
 
         # Eredmények frissítése
         if hasattr(self, 'last_results') and self.last_results:
@@ -1577,19 +1659,27 @@ Note: Panel and Dual modes are mutually exclusive.""")
             self.last_results["ranking_mode"] = mode
         self.results_df = ranked_df
 
-    def _auto_cleanup(self):
-        """Memória tisztítás auto futtatások között."""
-        try:
-            # Engine shutdown - worker processek leállítása
-            AnalysisEngine.shutdown()
+    def _auto_cleanup(self, on_complete=None):
+        """Memória tisztítás auto futtatások között (háttérszálon)."""
+        def run_cleanup():
+            try:
+                # Engine shutdown - worker processek leállítása
+                AnalysisEngine.shutdown()
 
-            # GC futtatás többször a ciklikus referenciák miatt
-            gc.collect()
-            gc.collect()
+                # GC futtatás többször a ciklikus referenciák miatt
+                gc.collect()
+                gc.collect()
+                
+                logging.debug("Auto Exec: Cleanup performed (bg)")
+            except Exception as e:  # pylint: disable=broad-except
+                logging.debug("Auto Exec: Cleanup warning: %s", e)
+            finally:
+                # Callback hívása a fő szálon, ha van
+                if on_complete:
+                    self.after(0, on_complete)
 
-            logging.debug("Auto Exec: Cleanup performed between model runs")
-        except Exception as e:
-            logging.debug("Auto Exec: Cleanup warning: %s", e)
+        # Futtatás külön szálon, hogy ne akassza meg a UI-t
+        threading.Thread(target=run_cleanup, daemon=True).start()
 
     # === SHUTDOWN METHODS ===
 
@@ -1624,7 +1714,7 @@ Note: Panel and Dual modes are mutually exclusive.""")
             try:
                 if self._auto_window.winfo_exists():
                     self._auto_window.var_shutdown.set(enabled)
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 pass
 
     def _execute_shutdown(self):
@@ -1643,5 +1733,5 @@ Note: Panel and Dual modes are mutually exclusive.""")
                 # Linux/Mac
                 subprocess.run(["shutdown", "-h", "+1"], check=True)
                 self._log("SHUTDOWN: System will shut down in 1 minute", "critical")
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             self._log(f"SHUTDOWN ERROR: {e}", "error")

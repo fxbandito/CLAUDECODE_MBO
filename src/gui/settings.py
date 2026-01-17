@@ -59,8 +59,20 @@ class SettingsManager:
         },
     }
 
+    _instance = None
+    _initialized = False
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(SettingsManager, cls).__new__(cls)
+        return cls._instance
+
     def __init__(self):
         """Initialize settings manager."""
+        if self._initialized:
+            return
+            
+        self._initialized = True
         # Store settings in the gui folder (same directory as this file)
         self.settings_dir = Path(os.path.dirname(__file__))
         self.settings_file = self.settings_dir / "window_config.json"

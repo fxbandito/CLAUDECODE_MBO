@@ -136,11 +136,14 @@ class ARIMAModel(BaseModel):
 
         Returns:
             Előrejelzett értékek listája
-
-        Note:
-            Ha teljes pipeline-t szeretnél (validálás + utófeldolgozás + horizontok),
-            használd a forecast_with_pipeline() metódust helyette.
         """
+        # Resource paraméterek kinyerése (Snapshot from GUI)
+        n_jobs = self.get_n_jobs(params)
+        device = self.get_device(params)
+
+        # Opcionális logolás debug módban
+        logger.debug("ARIMA running with n_jobs=%d on %s", n_jobs, device)
+
         # Paraméterek kinyerése
         full_params = self.get_params_with_defaults(params)
 
@@ -175,7 +178,7 @@ class ARIMAModel(BaseModel):
             # Utófeldolgozás (NaN kezelés, outlier capping)
             return self.postprocess(raw_forecasts, allow_negative=True)
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.error("ARIMA forecast error: %s", str(e))
             return self._fallback_forecast(values, steps)
 
@@ -206,8 +209,8 @@ class ARIMAModel(BaseModel):
         Returns:
             Előrejelzett értékek
         """
-        from statsmodels.tsa.arima.model import ARIMA
-        from numpy.linalg import LinAlgError
+        from statsmodels.tsa.arima.model import ARIMA  # pylint: disable=import-outside-toplevel
+        from numpy.linalg import LinAlgError  # pylint: disable=import-outside-toplevel
 
         # Trend paraméter - statsmodels szabály: trend rend >= d
         # d=0: bármilyen trend (n=0, c=0, t=1, ct=2)
@@ -291,8 +294,8 @@ class ARIMAModel(BaseModel):
         Returns:
             Előrejelzett értékek
         """
-        from statsmodels.tsa.arima.model import ARIMA
-        from numpy.linalg import LinAlgError
+        from statsmodels.tsa.arima.model import ARIMA  # pylint: disable=import-outside-toplevel
+        from numpy.linalg import LinAlgError  # pylint: disable=import-outside-toplevel
 
         # Fallback konfigurációk: (p, d, q, trend)
         # Szabály: trend rend >= d (d=1: t vagy ct; d=2: ct vagy n)

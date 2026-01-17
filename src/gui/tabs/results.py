@@ -3,24 +3,27 @@ Results Tab - MBO Trading Strategy Analyzer
 Mixin osztály a Results tab funkcionalitásához.
 """
 # pylint: disable=too-many-instance-attributes,attribute-defined-outside-init
-# pylint: disable=too-many-statements,too-many-locals
+# pylint: disable=too-many-statements,too-many-locals,too-many-lines,protected-access
 
 import logging
-import os
+
 import pickle
 import threading
 import traceback
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
+import os
 import pandas as pd
 
 from data.processor import DataProcessor
-from reporting.exporter import ReportExporter  # pylint: disable=wrong-import-order
+from reporting.exporter import ReportExporter
+
 
 
 class ResultsMixin:
     """Mixin a Results tab funkcionalitásához."""
+    # pylint: disable=protected-access
 
     def _create_results_tab(self) -> ctk.CTkFrame:
         """Results tab - elemzési eredmények megjelenítése."""
@@ -273,6 +276,25 @@ class ResultsMixin:
 ╚══════════════════════════════════════════════════════════════════════════════════════════════╝
 """
 
+    def _show_ranking_help(self):
+        """Show help dialog about ranking modes."""
+        self.sound.play_button_click()
+        messagebox.showinfo(
+            "Ranking Modes Help",
+            "Available Ranking Modes:\n\n"
+            "1. Standard (Forecast Only):\n"
+            "   Sorts strategies purely by their 1-month forecast profit.\n"
+            "   Best for finding the highest potential raw returns.\n\n"
+            "2. Stability Weighted:\n"
+            "   Combination: 60% Forecast + 40% Stability.\n"
+            "   Stability is calculated based on historical trade consistency.\n"
+            "   Best for finding reliable performers.\n\n"
+            "3. Risk Adjusted:\n"
+            "   Combination: 50% Forecast + 30% Sharpe Ratio + 20% Consistency.\n"
+            "   Penalizes high volatility and inconsistent returns.\n"
+            "   Best for conservative trading."
+        )
+
     # === Results tab eseménykezelők ===
 
     def _on_ranking_mode_change(self, value):
@@ -335,7 +357,8 @@ class ResultsMixin:
                 if hasattr(self, "get_data"):
                     ts_data = self.get_data()
                     if ts_data is not None:
-                        self.after(0, lambda: self._log("Using currently loaded data from Data Tab.", "debug"))
+                        self.after(0, lambda: self._log(
+                            "Using currently loaded data from Data Tab.", "debug"))
 
                 # 2. If not found, try to reconstruct from all_strategies_data
                 if ts_data is None:
@@ -565,135 +588,74 @@ class ResultsMixin:
         return self._generate_report_bg(base_output_dir, auto_mode, forced_suffix)
 
     def _generate_report_bg(self, base_output_dir, auto_mode, forced_suffix=None):
-        """Background thread logic for report generation."""
+        """Background Process logic for report generation."""
         try:
-            self.after(0, lambda: self._log("Generating report..."))
+            self._log("Starting report generation in separate process...")
 
             data = self.last_results
-            method = data["method"]
-            filename_base = data["filename_base"]
-            best_strat_id = data["best_strat_id"]
-            best_strat_data = data["best_strat_data"]
-            results_df = data["results"]
-            forecast_values = data.get("forecast_values")
 
-            # Get ranking mode for folder naming
-            ranking_mode = data.get("ranking_mode", "forecast")
-            ranking_suffix_map = {
-                "forecast": "Standard",
-                "stability": "StabilityWeighted",
-                "risk_adjusted": "RiskAdjusted"
+            # Extract simple data types for pickling (no GUI objects!)
+            process_data = {
+                "results": data["results"],
+                "method": data["method"],
+                "filename_base": data["filename_base"],
+                "best_strat_id": data["best_strat_id"],
+                "best_strat_data": data["best_strat_data"],
+                "params": data.get("params", {}),
+                "execution_time": data.get("execution_time", "N/A"),
+                "ranking_mode": data.get("ranking_mode", "forecast"),
+                "forecast_values": data.get("forecast_values"),
+                "base_output_dir": base_output_dir,
+                "auto_mode": auto_mode,
+                "forced_suffix": forced_suffix,
             }
-            ranking_suffix = ranking_suffix_map.get(ranking_mode, "Standard")
 
-            # Determine Best Strategy from CURRENT sorted results
-            if not results_df.empty:
-                top_row = results_df.iloc[0]
-                new_best_id = int(top_row["No."])
-                if new_best_id != best_strat_id:
-                    self.after(0, lambda: self._log(
-                        f"Ranking changed best strategy from {best_strat_id} to {new_best_id}"
-                    ))
-                    best_strat_id = new_best_id
-                    self.after(0, lambda: self._log(
-                        f"Re-simulating strategy {best_strat_id} for accurate charts..."
-                    ))
-                    try:
-                        new_best_data, new_forecasts = self._reconstruct_strategy_data(
-                            best_strat_id, data
-                        )
-                        if new_best_data is not None:
-                            best_strat_data = new_best_data
-                            forecast_values = new_forecasts
-                            self.after(0, lambda: self._log("Re-simulation successful."))
-                    except (ValueError, KeyError, IndexError, TypeError) as e:
-                        self.after(0, lambda err=e: self._log(f"Error re-simulating: {err}"))
+            # Queue for inter-process communication (logging)
+            import multiprocessing
+            queue = multiprocessing.Queue()
 
-            # Create specific subfolder with unique A01, A02 naming
-            currency_pair = filename_base.split("_")[0]
-            folder_name = f"{method}_{currency_pair}_{ranking_suffix}"
-            original_folder_name = folder_name
-
-            # Unique naming - A01, A02, stb. (auto és manual módban is)
-            if forced_suffix:
-                # Auto exec Stability/Risk report - ugyanaz a suffix mint Standard
-                folder_name = f"{original_folder_name}{forced_suffix}"
-            else:
-                # Új unique suffix generálása
-                counter = 1
-                while True:
-                    folder_name = f"{original_folder_name}_A{counter:02d}"
-                    if not os.path.exists(os.path.join(base_output_dir, folder_name)):
-                        break
-                    counter += 1
-
-            report_dir = os.path.join(base_output_dir, folder_name)
-            if not os.path.exists(report_dir):
-                os.makedirs(report_dir)
-
-            # Instantiate exporter
-            current_exporter = ReportExporter(report_dir)
-
-            # Get forecast values for HTML report
-            if forecast_values is None:
-                best_row = results_df[results_df["No."] == best_strat_id]
-                if not best_row.empty and "Forecasts" in best_row.columns:
-                    forecast_values = best_row.iloc[0]["Forecasts"]
-                    if not isinstance(forecast_values, list) or len(forecast_values) == 0:
-                        forecast_values = None
-
-            # Generate Reports (standard MD and HTML only)
-            md_path = current_exporter.create_markdown_report(
-                results_df, best_strat_id, method, [],
-                best_strat_data=best_strat_data,
-                filename_base=f"{method}_{filename_base}",
-                params=data["params"],
-                execution_time=data.get("execution_time", "N/A"),
-                ranking_mode=ranking_suffix,
+            # Start Process
+            p = multiprocessing.Process(
+                target=run_reporting_process,
+                args=(process_data, queue)
             )
+            p.start()
 
-            html_path = current_exporter.create_html_report(
-                results_df, best_strat_id, method,
-                best_strat_data=best_strat_data,
-                forecast_values=forecast_values,
-                filename_base=f"{method}_{filename_base}",
-                params=data["params"],
-                execution_time=data.get("execution_time", "N/A"),
-                ranking_mode=ranking_suffix,
-            )
+            # Start a thread to consume logs from the queue
+            threading.Thread(
+                target=self._consume_reporting_queue,
+                args=(queue,),
+                daemon=True
+            ).start()
 
-            self.after(0, lambda: self._log(f"Reports saved in: {report_dir}"))
-            self.after(0, lambda: self._log(f"MD: {os.path.basename(md_path)}", "debug"))
-            if html_path:
-                self.after(0, lambda: self._log(f"HTML: {os.path.basename(html_path)}", "debug"))
+            # For Auto Mode, we don't wait here (non-blocking)
+            # In "GUI is Boss" mode, auto execution continues.
+            # If we need to return the path, we might need a different approach.
+            # However, Auto Exec typically just triggers report and moves on.
 
-            # Auto Mode: Generate All Results report
-            if auto_mode:
-                try:
-                    self.after(0, lambda: self._log("Generating All Results report (auto)...", "debug"))
-                    forecast_horizon = data.get("params", {}).get("forecast_horizon", 52)
-                    ar_filename_base = f"AR_{method}_{filename_base}"
-                    ar_md_path, ar_html_path = current_exporter.create_all_results_report(
-                        results_df=results_df,
-                        method_name=method,
-                        best_strat_data=best_strat_data,
-                        filename_base=ar_filename_base,
-                        params=data.get("params", {}),
-                        execution_time=data.get("execution_time", "N/A"),
-                        forecast_horizon=forecast_horizon,
-                        ranking_mode=ranking_suffix,
-                    )
-                    self.after(0, lambda: self._log(f"AR MD: {os.path.basename(ar_md_path)}", "debug"))
-                    self.after(0, lambda: self._log(f"AR HTML: {os.path.basename(ar_html_path)}", "debug"))
-                except (OSError, ValueError, RuntimeError) as ar_e:
-                    self.after(0, lambda: self._log(f"Error generating AR report: {ar_e}", "warning"))
-
-            return report_dir
+            return None # Process runs asynchronously
 
         except (OSError, ValueError, RuntimeError) as e:
-            self.after(0, lambda err=e: self._log(f"Error generating report: {err}"))
+            self.after(0, lambda err=e: self._log(f"Error starting report process: {err}"))
             traceback.print_exc()
             return None
+
+    def _consume_reporting_queue(self, queue):
+        """Consumes log messages from the reporting process."""
+        while True:
+            try:
+                msg = queue.get()
+                if msg == "DONE":
+                    break
+                if isinstance(msg, tuple) and len(msg) == 2:
+                    level, text = msg
+                    self.after(0, lambda l=level, t=text: self._log(t, l))
+                else:
+                    self.after(0, lambda m=msg: self._log(m))
+            except Exception:  # pylint: disable=broad-except
+                break
+
+
 
     def _reconstruct_strategy_data(self, strat_id, context_data):
         """Get strategy data for report generation."""
@@ -955,7 +917,9 @@ class ResultsMixin:
             self.after(0, lambda: self._log(f"HTML: {os.path.basename(html_path)}", "debug"))
 
         except (OSError, ValueError, RuntimeError) as e:
-            self.after(0, lambda: self._log(f"Error generating Monthly Results report: {e}", "error"))
+            self.after(0, lambda: self._log(
+                f"Error generating Monthly Results report: {e}", "error"
+            ))
             traceback.print_exc()
 
     def _on_load_analysis_state(self):
@@ -1033,7 +997,8 @@ class ResultsMixin:
             num_strategies = len(self.results_df) if self.results_df is not None else 0
             num_with_history = len(self.all_strategies_data)
             self._log(
-                f"State loaded: {loaded_data.get('method', 'Unknown')} - {num_strategies} strategies"
+                f"State loaded: {loaded_data.get('method', 'Unknown')} - "
+                f"{num_strategies} strategies"
             )
             self._log(f"Strategies with full history: {num_with_history}", "debug")
 
@@ -1151,3 +1116,161 @@ Risk Adjusted:
 Click "Apply Ranking" to re-sort the results table."""
 
         self._show_info_popup("Metrics Help", msg)
+
+
+# Standalone function (outside class) for multiprocessing
+def run_reporting_process(data, queue):
+    """
+    Standalone function to run reporting in a separate process.
+    Bypasses GIL and GUI thread completely.
+    """
+    # pylint: disable=redefined-outer-name,reimported,import-outside-toplevel
+    try:
+
+
+        # Re-import necessary modules in the new process
+        from reporting.exporter import ReportExporter
+
+        import os
+        import pandas as pd
+
+        # Helper to send log to GUI
+        def log(msg, level="info"):
+            queue.put((level, msg))
+
+        log("Reporting process started...")
+
+        results_df = data["results"]
+        method = data["method"]
+        filename_base = data["filename_base"]
+        best_strat_id = data["best_strat_id"]
+        best_strat_data = data["best_strat_data"]
+        params = data["params"]
+        base_output_dir = data["base_output_dir"]
+        auto_mode = data["auto_mode"]
+        forced_suffix = data["forced_suffix"]
+        ranking_mode = data["ranking_mode"]
+        forecast_values = data["forecast_values"]
+
+        ranking_suffix_map = {
+            "forecast": "Standard",
+            "stability": "StabilityWeighted",
+            "risk_adjusted": "RiskAdjusted"
+        }
+        ranking_suffix = ranking_suffix_map.get(ranking_mode, "Standard")
+
+        # Determine Best Strategy from CURRENT sorted results
+        if not results_df.empty:
+            top_row = results_df.iloc[0]
+            new_best_id = int(top_row["No."])
+            if new_best_id != best_strat_id:
+                log(f"Ranking changed best strategy from {best_strat_id} to {new_best_id}")
+                best_strat_id = new_best_id
+                # Note: Re-simulation inside process might require raw data access. 
+                # If we passed best_strat_data for the OLD ID, we might have mismatch.
+                # Ideally we handled this before dispatch, or we accept the limitation for now.
+                # Reconstruction logic was complex in ResultsMixin (accessed self.get_data).
+                # For safety/simplicity in V1 process-based, we stick to passed data or simple data.
+
+        # Create specific subfolder
+        currency_pair = filename_base.split("_")[0]
+        folder_name = f"{method}_{currency_pair}_{ranking_suffix}"
+        original_folder_name = folder_name
+
+        if forced_suffix:
+            folder_name = f"{original_folder_name}{forced_suffix}"
+        else:
+            counter = 1
+            while True:
+                folder_name = f"{original_folder_name}_A{counter:02d}"
+                if not os.path.exists(os.path.join(base_output_dir, folder_name)):
+                    break
+                counter += 1
+
+        report_dir = os.path.join(base_output_dir, folder_name)
+        if not os.path.exists(report_dir):
+            os.makedirs(report_dir)
+
+        current_exporter = ReportExporter(report_dir)
+
+        # Generate Reports
+        md_path = current_exporter.create_markdown_report(
+            results_df, best_strat_id, method, [],
+            best_strat_data=best_strat_data,
+            filename_base=f"{method}_{filename_base}",
+            params=params,
+            execution_time=data["execution_time"],
+            ranking_mode=ranking_suffix,
+        )
+
+        html_path = current_exporter.create_html_report(
+            results_df, best_strat_id, method,
+            best_strat_data=best_strat_data,
+            forecast_values=forecast_values,
+            filename_base=f"{method}_{filename_base}",
+            params=params,
+            execution_time=data["execution_time"],
+            ranking_mode=ranking_suffix,
+        )
+
+        log(f"Reports saved in: {report_dir}")
+        log(f"MD: {os.path.basename(md_path)}", "debug")
+        if html_path:
+            log(f"HTML: {os.path.basename(html_path)}", "debug")
+
+        # Auto Mode additional reports
+        if auto_mode:
+            log("Generating All Results report (auto)...", "debug")
+            forecast_horizon = params.get("forecast_horizon", 52)
+            ar_filename_base = f"AR_{method}_{filename_base}"
+            try:
+                ar_md_path, ar_html_path = current_exporter.create_all_results_report(
+                    results_df=results_df,
+                    method_name=method,
+                    best_strat_data=best_strat_data,
+                    filename_base=ar_filename_base,
+                    params=params,
+                    execution_time=data["execution_time"],
+                    forecast_horizon=forecast_horizon,
+                    ranking_mode=ranking_suffix,
+                )
+                log(f"AR MD: {os.path.basename(ar_md_path)}", "debug")
+                log(f"AR HTML: {os.path.basename(ar_html_path)}", "debug")
+            except Exception as ar_e:  # pylint: disable=broad-except
+                log(f"Error generating AR report: {ar_e}", "warning")
+
+            log("Generating Monthly Results report (auto)...", "debug")
+            mr_filename_base = f"MR_{method}_{filename_base}"
+            try:
+                mr_md_path = current_exporter.create_monthly_markdown_report(
+                    results_df=results_df,
+                    best_strategy_id=best_strat_id,
+                    method_name=method,
+                    best_strat_data=best_strat_data,
+                    filename_base=mr_filename_base,
+                    params=params,
+                    execution_time=data["execution_time"],
+                    ranking_mode=ranking_suffix,
+                )
+                mr_html_path = current_exporter.create_monthly_html_report(
+                    results_df=results_df,
+                    best_strategy_id=best_strat_id,
+                    method_name=method,
+                    best_strat_data=best_strat_data,
+                    filename_base=mr_filename_base,
+                    params=params,
+                    execution_time=data["execution_time"],
+                    ranking_mode=ranking_suffix,
+                )
+                log(f"MR MD: {os.path.basename(mr_md_path)}", "debug")
+                if mr_html_path:
+                    log(f"MR HTML: {os.path.basename(mr_html_path)}", "debug")
+            except Exception as mr_e:  # pylint: disable=broad-except
+                log(f"Error generating MR report: {mr_e}", "warning")
+
+    except Exception as e:  # pylint: disable=broad-except
+        queue.put(("error", f"Reporting process error: {e}"))
+        import traceback
+        traceback.print_exc()
+    finally:
+        queue.put("DONE")

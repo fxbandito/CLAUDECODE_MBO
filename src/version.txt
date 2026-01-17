@@ -1,4 +1,4 @@
-v5.5.3 Beta
+v5.5.4 Beta
 - Pause gomb deadlock javítás (engine.py): pause check átmozgatva lock-on kívülre
 - Data_raw path fix (results.py): projekt főkönyvtárba ment, nem src-be
 - analyze_strategy() paraméter javítás: helyes függvény szignatúra

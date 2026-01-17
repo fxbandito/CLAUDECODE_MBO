@@ -59,7 +59,7 @@ Resource Manager (src/analysis/engine.py):
 """
 
 import logging
-import os
+
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Union, TYPE_CHECKING
 from dataclasses import dataclass
@@ -167,6 +167,9 @@ class BaseModel(ABC):
     ) -> List[float]:
         """
         Előrejelzés készítése.
+        
+        Subclasses MUST use self.get_n_jobs(params) and self.get_device(params)
+        instead of accessing global resource managers!
 
         Args:
             data: Bemeneti idősor adatok
@@ -176,6 +179,37 @@ class BaseModel(ABC):
         Returns:
             Előrejelzett értékek listája (hossza = steps)
         """
+
+    def get_n_jobs(self, params: Dict[str, Any]) -> int:
+        """
+        GUI által vezérelt n_jobs lekérdezése a paraméterekből.
+        DECENTRALIZED RESOURCE MANAGEMENT implementation via Injection.
+        """
+        # 1. Check for injected secure key (highest priority)
+        if '_n_jobs' in params:
+            return int(params['_n_jobs'])
+
+        # 2. Check for standard param key (if user set it manually in params)
+        if 'n_jobs' in params:
+            return int(params['n_jobs'])
+
+        # 3. Fallback (should ideally not happen with correct injection)
+        return 1
+
+    def get_device(self, params: Dict[str, Any]) -> str:
+        """
+        GUI által vezérelt device (cpu/cuda) lekérdezése.
+        DECENTRALIZED RESOURCE MANAGEMENT implementation via Injection.
+        """
+        # 1. Check for injected secure key
+        if '_device' in params:
+            return str(params['_device'])
+
+        # 2. Legacy check (use_gpu param)
+        if params.get('use_gpu', False):
+            return 'cuda'
+
+        return 'cpu'
 
     # =========================================================================
     # UTILITY WRAPPER METÓDUSOK - A models/utils modulok egyszerű elérése
@@ -207,7 +241,7 @@ class BaseModel(ABC):
                 clean_data = validation.processed_data
                 # ...
         """
-        from models.utils.validation import validate_input_data, RECOMMENDED_MIN_POINTS
+        from models.utils.validation import validate_input_data, RECOMMENDED_MIN_POINTS  # pylint: disable=import-outside-toplevel
 
         # Kategória alapú minimum pontok
         if min_points is None:
@@ -252,7 +286,7 @@ class BaseModel(ABC):
                 raw_forecasts = self._run_model(data, steps)
                 return self.postprocess(raw_forecasts)
         """
-        from models.utils.postprocessing import postprocess_forecasts, PostprocessingConfig
+        from models.utils.postprocessing import postprocess_forecasts, PostprocessingConfig  # pylint: disable=import-outside-toplevel
 
         config = PostprocessingConfig(
             handle_nan=True,
@@ -287,7 +321,7 @@ class BaseModel(ABC):
             horizons = self.calculate_horizons(forecasts)
             print(f"1 month forecast: {horizons.h4}")
         """
-        from models.utils.aggregation import calculate_horizons
+        from models.utils.aggregation import calculate_horizons  # pylint: disable=import-outside-toplevel
         return calculate_horizons(forecasts, allow_negative=allow_negative)
 
     def create_timer(
@@ -314,7 +348,7 @@ class BaseModel(ABC):
                     result = self._run_model(data, steps)
                 return result
         """
-        from models.utils.monitoring import ForecastTimer
+        from models.utils.monitoring import ForecastTimer  # pylint: disable=import-outside-toplevel
         return ForecastTimer(
             model_name=self.MODEL_INFO.name,
             strategy_id=strategy_id,
@@ -373,7 +407,7 @@ class BaseModel(ABC):
             )
             print(f"1 month forecast: {result['Forecast_1M']}")
         """
-        import numpy as np
+        import numpy as np  # pylint: disable=import-outside-toplevel
 
         # 1. Validálás
         validation = self.validate_input(data)
@@ -404,7 +438,7 @@ class BaseModel(ABC):
                     steps,
                     params
                 )
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.error(
                 "Strategy %s: forecast error - %s",
                 strategy_id or "unknown",
@@ -491,15 +525,10 @@ class BaseModel(ABC):
 
         # Párhuzamos feldolgozás joblib-bal
         try:
-            from joblib import Parallel, delayed
+            from joblib import Parallel, delayed  # pylint: disable=import-outside-toplevel
 
-            # ResourceManager-től kérjük a CPU beállítást
-            try:
-                from analysis.engine import get_resource_manager
-                manager = get_resource_manager()
-                max_jobs = manager.get_n_jobs()
-            except ImportError:
-                max_jobs = os.cpu_count() or 4
+            # Use injected n_jobs from params
+            max_jobs = self.get_n_jobs(params)
 
             n_jobs = min(max_jobs, len(all_data), 8)
 
@@ -540,7 +569,7 @@ class BaseModel(ABC):
         Returns:
             Dict ahol kulcs = stratégia név, érték = forecast_with_pipeline eredmény
         """
-        from models.utils.monitoring import BatchPerformanceMonitor
+        from models.utils.monitoring import BatchPerformanceMonitor  # pylint: disable=import-outside-toplevel
 
         results = {}
 
@@ -561,36 +590,12 @@ class BaseModel(ABC):
     # DEVICE ÉS GPU KEZELÉS
     # =========================================================================
 
-    def get_device(self, data_size: int, use_gpu: bool = True):
-        """
-        Visszaadja a megfelelő device-t (CPU/GPU).
 
-        A döntés a MODEL SAJÁT gpu_threshold értéke alapján történik.
 
-        Args:
-            data_size: Adat méret
-            use_gpu: Felhasználó kéri-e a GPU használatot
-
-        Returns:
-            torch.device vagy "cpu" string
-        """
-        if not self.MODEL_INFO.supports_gpu:
-            return "cpu"
-
-        if not use_gpu:
-            return "cpu"
-
-        # Késleltetett import - csak ha tényleg kell
-        try:
-            import torch
-            if torch.cuda.is_available() and data_size >= self.MODEL_INFO.gpu_threshold:
-                return torch.device("cuda")
-        except ImportError:
-            pass
-
-        return "cpu"
-
-    def get_params_with_defaults(self, user_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def get_params_with_defaults(
+        self,
+        user_params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """
         Egyesíti a felhasználói paramétereket az alapértékekkel.
 
@@ -642,39 +647,22 @@ class BaseModel(ABC):
                 finally:
                     self.cleanup_after_batch()
         """
-        import gc
+        import gc  # pylint: disable=import-outside-toplevel
         gc.collect()
 
         try:
-            from analysis.process_utils import cleanup_cuda_context
+            from analysis.process_utils import cleanup_cuda_context  # pylint: disable=import-outside-toplevel
             cleanup_cuda_context()
         except ImportError:
             # process_utils nem elérhető - próbáljuk közvetlenül
             try:
-                import torch
+                import torch  # pylint: disable=import-outside-toplevel
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
             except ImportError:
                 pass
 
-    def get_n_jobs(self, max_limit: int = 8) -> int:
-        """
-        Ajánlott párhuzamos job szám lekérése.
 
-        A ResourceManager CPU slider beállítása alapján.
-
-        Args:
-            max_limit: Maximum job szám (default: 8)
-
-        Returns:
-            int: Ajánlott job szám
-        """
-        try:
-            from analysis.engine import get_resource_manager
-            manager = get_resource_manager()
-            return min(manager.get_n_jobs(), max_limit)
-        except ImportError:
-            return min(os.cpu_count() or 4, max_limit)
 
     def should_use_gpu(self, data_size: int, params: Dict[str, Any]) -> bool:
         """
@@ -701,7 +689,7 @@ class BaseModel(ABC):
             return False
 
         try:
-            import torch
+            import torch  # pylint: disable=import-outside-toplevel
             return torch.cuda.is_available()
         except ImportError:
             return False

@@ -96,7 +96,7 @@ class ResourceManager:
     def _detect_physical_cores(self) -> int:
         """Fizikai CPU magok számának detektálása."""
         try:
-            import psutil
+            import psutil  # pylint: disable=import-outside-toplevel
             return psutil.cpu_count(logical=False) or 4
         except ImportError:
             # Fallback: logikai magok fele
@@ -106,7 +106,7 @@ class ResourceManager:
     def _detect_logical_cores(self) -> int:
         """Logikai CPU magok számának detektálása."""
         try:
-            import psutil
+            import psutil  # pylint: disable=import-outside-toplevel
             return psutil.cpu_count(logical=True) or 8
         except ImportError:
             return os.cpu_count() or 4
@@ -118,7 +118,7 @@ class ResourceManager:
     def _detect_gpu(self) -> bool:
         """GPU elérhetőség ellenőrzése."""
         try:
-            import torch
+            import torch  # pylint: disable=import-outside-toplevel
             return torch.cuda.is_available()
         except ImportError:
             return False
@@ -126,7 +126,7 @@ class ResourceManager:
     def _get_gpu_name(self) -> str:
         """GPU nevének lekérdezése."""
         try:
-            import torch
+            import torch  # pylint: disable=import-outside-toplevel
             if torch.cuda.is_available():
                 return torch.cuda.get_device_name(0)
         except (ImportError, RuntimeError):
@@ -177,7 +177,7 @@ class ResourceManager:
             for callback in self._cpu_callbacks:
                 try:
                     callback(new_value)
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-except
                     logger.warning("CPU callback error: %s", e)
 
     def get_n_jobs(self) -> int:
@@ -253,7 +253,7 @@ class ResourceManager:
             for callback in self._gpu_callbacks:
                 try:
                     callback(enabled)
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-except
                     logger.warning("GPU callback error: %s", e)
 
     def get_device(self) -> str:
@@ -377,7 +377,7 @@ def get_resource_manager() -> ResourceManager:
         from analysis.engine import get_resource_manager
         manager = get_resource_manager()
     """
-    global _resource_manager
+    global _resource_manager  # pylint: disable=global-statement
     if _resource_manager is None:
         _resource_manager = ResourceManager()
     return _resource_manager
@@ -545,7 +545,7 @@ class AnalysisEngine:
             self._progress_callback(self._progress)
             self._last_progress_time = current_time
             self._last_progress_percent = current_percent
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning("Progress callback error: %s", e)
 
     def extract_strategies(
@@ -644,13 +644,32 @@ class AnalysisEngine:
 
         try:
             model = model_class()
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.error("Error creating model %s: %s", context.model_name, e)
             return {}
 
         # Paraméterek összefűzése
         params = get_param_defaults(context.model_name)
         params.update(context.params)
+
+        # =========================================================================
+        # DECENTRALIZED RESOURCE MANAGEMENT INJECTION
+        # A GUI beállításait itt "fényképezzük le" és adjuk át direkt paraméterként.
+        # A modelleknek ezeket a belső változókat kell használniuk (pl. params['_n_jobs'])
+        # =========================================================================
+        if self._resource_manager:
+            # Snapshot készítése az aktuális állapotról
+            current_n_jobs = self._resource_manager.get_n_jobs()
+            current_device = self._resource_manager.get_device()
+
+            # Speciális (védett) kulcsok injektálása a paraméterekbe
+            params['_n_jobs'] = current_n_jobs
+            params['_device'] = current_device
+
+            logger.info(
+                "Resource Injection: Model='%s' <-- n_jobs=%d, device='%s'", 
+                context.model_name, current_n_jobs, current_device
+            )
 
         start_time = time.time()
         results: Dict[str, AnalysisResult] = {}
@@ -707,7 +726,7 @@ class AnalysisEngine:
                     elapsed_ms=elapsed_ms,
                     success=True
                 )
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 results[strategy_id] = AnalysisResult(
                     strategy_id=strategy_id,
@@ -770,7 +789,7 @@ class AnalysisEngine:
                     success=True
                 )
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             elapsed_ms = (time.perf_counter() - start) * 1000
             logger.error("Batch forecast error: %s", e)
 
@@ -850,6 +869,6 @@ def analyze_strategy(
             full_params.update(params)
 
         return model.forecast(data, steps, full_params)
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         logger.error("analyze_strategy error: %s", e)
         return [np.nan] * steps
